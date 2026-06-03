@@ -31,13 +31,16 @@ def umeyama(src: np.ndarray, dst: np.ndarray) -> np.ndarray:
 
 
 def default_M() -> np.ndarray:
-    """Fallback UE(LH, Z-up, cm) -> Disguise(Y-up, m) base transform.
-    Starting point only; replaced by umeyama() result from P6 calibration."""
+    """Fallback UE(Z-up, cm) -> Disguise(Y-up, m) base transform.
+    A PROPER rotation (det=+1): +90deg about X maps Z-up -> Y-up. This does NOT
+    resolve UE's left-handed -> right-handed handedness (that is determined empirically
+    by P5/P6 Umeyama calibration); it is only a non-mirrored starting point for the
+    offline dry-run preview, replaced by config.calibration.M_ue2dis after calibration."""
     scale = 0.01  # cm -> m
-    # Z-up -> Y-up axis remap: (x, y, z)_ue -> (x, z, y)_dis
+    # +90deg about X: (x, y, z)_ue -> (x, z, -y)_dis  (det = +1)
     A = np.array([[1, 0, 0],
                   [0, 0, 1],
-                  [0, 1, 0]], dtype=float)
+                  [0, -1, 0]], dtype=float)
     M = np.eye(4)
     M[:3, :3] = scale * A
     return M

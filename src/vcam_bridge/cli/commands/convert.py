@@ -12,14 +12,21 @@ from vcam_bridge.designer.codegen import build_inject_script
 
 
 def _stage_pose_for_frame(T_ue: np.ndarray, M: np.ndarray, cal) -> tuple[np.ndarray, np.ndarray]:
-    """Apply M_ue2dis to the camera position and rotation. Returns (C_stage, R_stage)."""
+    """Apply M_ue2dis to the camera position and rotation. Returns (C_stage, R_stage).
+    Extracts the nearest PROPER rotation via SVD so a reflection/handedness component
+    in M never silently mirrors the orientation."""
     C_ue = T_ue[:3, 3]
     C_stage = apply_M(M, C_ue.reshape(1, 3))[0]
-    # rotation part of M (drop scale) applied to camera basis
     Rm = M[:3, :3]
-    scale = float(np.cbrt(np.linalg.det(Rm)))
-    R_only = Rm / scale if scale != 0 else Rm
-    R_stage = R_only @ T_ue[:3, :3]
+    det = np.linalg.det(Rm)
+    scale = abs(det) ** (1.0 / 3.0)
+    A = Rm / scale
+    U, _, Vt = np.linalg.svd(A)
+    R_lin = U @ Vt
+    if np.linalg.det(R_lin) < 0:
+        U[:, -1] = -U[:, -1]
+        R_lin = U @ Vt
+    R_stage = R_lin @ T_ue[:3, :3]
     return C_stage, R_stage
 
 
@@ -45,8 +52,23 @@ def convert_dry_run(fbx_or_intermediate: str, *, config: Config,
             "distance": pose["distance"], "fov": fov,
         })
 
-    field_map = cal.field_map or {"fov": "fieldOfView", "distance": "distance"}
-    inject_payload = {"layer_uid": layer_uid, "fields": field_map, "keys": []}
+    field_map = cal.field_map or {
+        "pivot.x": "camera_pivot.x", "pivot.y": "camera_pivot.y", "pivot.z": "camera_pivot.z",
+        "rotation.x": "camera_rotation.x", "rotation.y": "camera_rotation.y",
+        "rotation.z": "camera_rotation.z", "distance": "distance", "fov": "fieldOfView",
+    }
+    keys = []
+    for kf in keyframes:
+        keys.append({
+            "t_sec": kf["t_sec"],
+            "values": {
+                "pivot.x": kf["pivot"][0], "pivot.y": kf["pivot"][1], "pivot.z": kf["pivot"][2],
+                "rotation.x": kf["rotation"][0], "rotation.y": kf["rotation"][1],
+                "rotation.z": kf["rotation"][2], "distance": kf["distance"], "fov": kf["fov"],
+            },
+        })
+    inject_payload = {"layer_uid": layer_uid, "start_offset_sec": 0.0,
+                      "fields": field_map, "keys": keys}
     inject_script = build_inject_script(inject_payload)
 
     data = {
@@ -55,7 +77,9 @@ def convert_dry_run(fbx_or_intermediate: str, *, config: Config,
             "fps": track.fps,
             "fov_axis": fov_axis,
             "keyframes": keyframes,
-            "note": "beat values are resolved live via track.timeToBeat at inject time",
+            "note": ("field map names and start_offset_sec are placeholders resolved live in "
+                     "Plan 2 (P2 field map; --start-tc/--at-playhead); beats are computed "
+                     "in-script via track.timeToBeat"),
         },
         "inject_script": inject_script,
     }

@@ -62,3 +62,30 @@ def test_main_convert_missing_fbx_error_envelope(tmp_path, capsys):
     assert env["status"] == "error"
     assert env["error"]["code"] == "INVALID_FBX"
     assert env["error"]["exit_code"] == 13
+
+
+def test_stage_pose_default_transform_not_mirrored():
+    import numpy as np
+    from vcam_bridge.cli.commands.convert import _stage_pose_for_frame
+    from vcam_bridge.transform.register import default_M
+    from vcam_bridge.domain.models import Calibration
+    T = np.eye(4)
+    T[:3, 3] = [100.0, 0.0, 0.0]   # UE camera at +100cm X
+    C, R = _stage_pose_for_frame(T, default_M(), Calibration())
+    assert C[0] > 0                                   # +X stays +X (not mirrored)
+    assert np.isclose(np.linalg.det(R), 1.0, atol=1e-9)   # proper rotation
+
+
+def test_convert_dry_run_inject_script_has_populated_keys(sample_track_json):
+    import re, ast, json
+    from vcam_bridge.config import load_config
+    from vcam_bridge.cli.commands.convert import convert_dry_run
+    cfg = load_config(None)
+    _, data = convert_dry_run(str(sample_track_json), config=cfg,
+                              layer_uid="0xabc", fov_axis="horizontal")
+    m = re.search(r"payload = json\.loads\((.*)\)\n", data["inject_script"])
+    pl = json.loads(ast.literal_eval(m.group(1)))
+    assert len(pl["keys"]) == 2
+    assert "fov" in pl["keys"][0]["values"]
+    assert "pivot.x" in pl["keys"][0]["values"]
+    assert "timeToBeat" in data["inject_script"]

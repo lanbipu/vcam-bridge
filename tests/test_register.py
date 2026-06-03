@@ -26,3 +26,12 @@ def test_default_M_is_4x4_and_scales_cm_to_m():
     assert M.shape == (4, 4)
     out = apply_M(M, np.array([[100.0, 0.0, 0.0]]))   # 100 cm -> 1 m magnitude
     assert np.isclose(np.linalg.norm(out[0]), 1.0, atol=1e-9)
+
+
+def test_default_M_is_proper_rotation():
+    M = default_M()
+    Rm = M[:3, :3]
+    assert np.linalg.det(Rm) > 0
+    scale = abs(np.linalg.det(Rm)) ** (1.0 / 3.0)
+    R = Rm / scale
+    assert np.isclose(np.linalg.det(R), 1.0, atol=1e-9)

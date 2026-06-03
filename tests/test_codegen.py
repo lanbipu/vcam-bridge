@@ -10,8 +10,9 @@ from vcam_bridge.designer.codegen import (
 def _payload():
     return {
         "layer_uid": "0x1a2b",
+        "start_offset_sec": 0.0,
         "fields": {"pivot.x": "camera_pivot.x", "fov": "fieldOfView"},
-        "keys": [{"beat": 1.0, "values": {"pivot.x": 1.5, "fov": 60.0}}],
+        "keys": [{"t_sec": 1.0, "values": {"pivot.x": 1.5, "fov": 60.0}}],
     }
 
 

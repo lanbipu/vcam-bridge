@@ -35,9 +35,10 @@ else:
     if missing:
         result = {"ok": False, "error": "missing fields", "missing": missing}
     else:
+        start_offset = payload["start_offset_sec"]
         written = 0
         for kf in payload["keys"]:
-            beat = kf["beat"]
+            beat = track.timeToBeat(start_offset + kf["t_sec"])
             vals = kf["values"]
             for key in vals:
                 seqs[key].sequence.setFloat(beat, vals[key])

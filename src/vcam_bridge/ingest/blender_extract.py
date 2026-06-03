@@ -1,0 +1,71 @@
+"""Runs INSIDE Blender: blender --background --factory-startup --python this.py -- --in ... --out ...
+Emits a vcam.track/1 JSON: per-frame world matrix (T 4x4), horizontal FOV (angle_x), fps, focus."""
+import argparse
+import json
+import sys
+
+import bpy   # only available inside Blender
+
+
+def _parse(argv):
+    if "--" in argv:
+        argv = argv[argv.index("--") + 1:]
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--in", dest="inp", required=True)
+    ap.add_argument("--out", dest="out", required=True)
+    ap.add_argument("--camera", default="")
+    return ap.parse_args(argv)
+
+
+def _import(path):
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    bpy.ops.import_scene.fbx(filepath=path)
+
+
+def _pick_camera(name):
+    cams = sorted([o for o in bpy.data.objects if o.type == "CAMERA"], key=lambda o: o.name)
+    if not cams:
+        raise SystemExit("ERR_NO_CAMERA")
+    if name:
+        for c in cams:
+            if c.name == name:
+                return c
+        raise SystemExit("ERR_CAMERA_NOT_FOUND:%s|%s" % (name, [c.name for c in cams]))
+    if len(cams) > 1:
+        raise SystemExit("ERR_MULTI_CAMERA:%s" % [c.name for c in cams])
+    return cams[0]
+
+
+def _frame_range(cam, scene):
+    ad = cam.animation_data
+    if ad and ad.action:
+        lo, hi = ad.action.frame_range
+        return int(round(lo)), int(round(hi))
+    return scene.frame_current, scene.frame_current
+
+
+def main():
+    args = _parse(list(sys.argv))
+    _import(args.inp)
+    cam = _pick_camera(args.camera)
+    scene = bpy.context.scene
+    fps = scene.render.fps / max(1.0, float(scene.render.fps_base))
+    f0, f1 = _frame_range(cam, scene)
+    import math
+    frames = []
+    for f in range(f0, f1 + 1):
+        scene.frame_set(f)
+        mw = cam.matrix_world
+        T = [[mw[r][c] for c in range(4)] for r in range(4)]
+        fov_h = math.degrees(cam.data.angle_x)
+        focus = cam.data.dof.focus_distance if cam.data.dof else None
+        frames.append({"idx": f - f0, "t_sec": (f - f0) / fps, "T": T,
+                       "fov_h_deg": fov_h, "focus_m": focus})
+    out = {"schema": "vcam.track/1", "fps": fps, "camera": cam.name, "frames": frames}
+    with open(args.out, "w") as fh:
+        json.dump(out, fh)
+    print("OK_FRAMES=%d" % len(frames))
+
+
+if __name__ == "__main__":
+    main()

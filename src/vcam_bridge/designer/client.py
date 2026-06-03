@@ -20,41 +20,39 @@ class ExecuteResult:
 
 class DesignerClient:
     """Wraps a Transport: solo/director routing + /execute call with parsing, error
-    mapping, userScript line-offset correction, and simple retry on retryable errors."""
+    mapping, userScript line-offset correction, and (no client-level retry; chunk-level
+    timeout recovery lives in inject.py's bisect logic)."""
 
-    def __init__(self, transport: Transport, host: str, *, timeout_s: float = 30.0, retries: int = 2):
+    def __init__(self, transport: Transport, host: str, *, timeout_s: float = 30.0):
         self._t = transport
         self.host = host
         self._timeout_s = timeout_s
-        self._retries = retries
 
     def resolve_routing(self) -> None:
         st = self._t.get_json(self.host, "/api/session/status/session", self._timeout_s)
         if not st.get("isRunningSolo", True):
+            # NOTE: director.hostname carries no port; HTTP defaults to :80.
+            # Non-standard director ports must be handled at live-calibration time.
             self.host = st["director"]["hostname"]
 
     @staticmethod
     def _fix_line_offset(msg: str) -> str:
         # Designer wraps the script in def userScript(): so reported lines are +10.
         def repl(m: re.Match) -> str:
-            return "line %d" % (int(m.group(1)) - 10)
+            return "line %d" % max(int(m.group(1)) - 10, 1)
         return _LINE_RE.sub(repl, msg)
 
     def execute(self, script: str, module_name: str | None = None) -> ExecuteResult:
-        last_exc: Exception | None = None
-        for _ in range(self._retries + 1):
-            resp = self._t.post_execute(self.host, script, module_name, self._timeout_s)
-            status = resp.get("status", {}) or {}
-            code = status.get("code", 0)
-            if code == 0:
-                rv = resp.get("returnValue", "null")
-                value = None if rv in (None, "null", "") else json.loads(rv)
-                return ExecuteResult(value, resp.get("d3Log", ""), resp.get("pythonLog", ""))
-            msg = self._fix_line_offset(status.get("message", "") or "")
-            details = {"code": code, "details": status.get("details", []),
-                       "d3Log": resp.get("d3Log", ""), "pythonLog": resp.get("pythonLog", "")}
-            if "TimeoutError" in msg or "KeyboardInterrupt" in msg:
-                raise DesignerTimeoutError(msg or "Designer python execution timed out", details=details)
-            last_exc = ExternalError(msg or "Designer execute failed", details=details)
-            break  # non-timeout execute errors are not retried (deterministic)
-        raise last_exc  # type: ignore[misc]
+        resp = self._t.post_execute(self.host, script, module_name, self._timeout_s)
+        status = resp.get("status", {}) or {}
+        code = status.get("code", 0)
+        if code == 0:
+            rv = resp.get("returnValue", "null")
+            value = None if rv in (None, "null", "") else json.loads(rv)
+            return ExecuteResult(value, resp.get("d3Log", ""), resp.get("pythonLog", ""))
+        msg = self._fix_line_offset(status.get("message", "") or "")
+        details = {"code": code, "details": status.get("details", []),
+                   "d3Log": resp.get("d3Log", ""), "pythonLog": resp.get("pythonLog", "")}
+        if "TimeoutError" in msg or "KeyboardInterrupt" in msg:
+            raise DesignerTimeoutError(msg or "Designer python execution timed out", details=details)
+        raise ExternalError(msg or "Designer execute failed", details=details)

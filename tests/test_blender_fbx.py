@@ -18,7 +18,7 @@ def test_find_blender_raises_when_missing(monkeypatch):
         find_blender(blender_path="/nonexistent/blender")
 
 
-def test_cache_key_changes_with_script(tmp_path):
+def test_cache_key_changes_with_camera(tmp_path):
     fbx = tmp_path / "a.fbx"; fbx.write_bytes(b"fbxbytes")
     k1 = _cache_key(str(fbx), camera="Cam", blender_ver="4.0")
     k2 = _cache_key(str(fbx), camera="Other", blender_ver="4.0")

@@ -21,6 +21,8 @@ def solve_convention(samples: list[dict]) -> dict:
     Returns the candidate {forward_axis, euler_order, pos_error, rot_error} that best
     reproduces the readback world poses. (handedness is absorbed by P6 Umeyama; this
     locks forward axis + euler order against measured VC world poses.)"""
+    if not samples:
+        raise ValueError("solve_convention requires at least one sample")
     best = None
     for cand in CANDIDATES:
         pos_err = 0.0

@@ -33,7 +33,7 @@ def test_inject_halves_chunk_on_timeout():
     # first call (50 keys) -> timeout; then two 25-key calls succeed
     timeout = {"status": {"code": 1, "message": "TimeoutError"}, "returnValue": "null", "d3Log": "", "pythonLog": ""}
     ft = FT(execute_responses=[timeout, _ok('{"ok": true, "written": 25}'), _ok('{"ok": true, "written": 25}')])
-    c = DesignerClient(ft, "localhost", retries=0)
+    c = DesignerClient(ft, "localhost")
     written = inject_keys(c, layer_uid="0x1", fields={"fov": "fieldOfView"}, keys=_keys(50),
                           start_offset_sec=0.0, chunk_size=50)
     assert written == 50

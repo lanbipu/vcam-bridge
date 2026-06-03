@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import signal
 import shutil
 import subprocess
 import sys
@@ -71,7 +72,7 @@ def _run_blender(blender, script, inp, out, camera, timeout):
         so, se = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
         try:
-            os.killpg(os.getpgid(proc.pid), 9)
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
         except Exception:
             proc.kill()
         proc.communicate()
@@ -98,7 +99,11 @@ def extract_fbx(fbx_path: str, *, camera: str | None = None, blender_path: str |
             raise InvalidFbxError("Blender FBX extraction failed (rc=%s)" % rc,
                                   details={"stderr": se[-2000:], "stdout": so[-500:]})
         os.replace(tmp, out_json)
-    data = json.loads(out_json.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(out_json.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        raise InvalidFbxError("corrupt Blender cache file: %s" % out_json,
+                              details={"cache": str(out_json), "error": str(exc)}) from exc
     if not data.get("frames"):
         raise InvalidFbxError("FBX produced no frames", details={"path": fbx_path})
     return CameraTrack.model_validate(data)

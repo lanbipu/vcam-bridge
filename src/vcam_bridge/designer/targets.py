@@ -11,7 +11,7 @@ for track in [local_state.track]:
     for layer in track.layers:
         mt = str(layer.moduleType())
         if "AnimateCamera" in mt:
-            out.append([layer.name, hex(layer.uid)])
+            out.append([layer.name, "0x%x" % layer.uid])
 return json.dumps(out)
 '''
 
@@ -20,7 +20,7 @@ import json
 out = []
 for cam in state.stage.cameras:
     if getattr(cam, "isVirtual", False) or "Virtual" in str(type(cam).__name__):
-        out.append([cam.name, hex(cam.uid)])
+        out.append([cam.name, "0x%x" % cam.uid])
 return json.dumps(out)
 '''
 

@@ -1,0 +1,69 @@
+from __future__ import annotations
+
+from typing import Any
+from pydantic import BaseModel, Field, field_validator
+
+
+class Frame(BaseModel):
+    idx: int
+    t_sec: float
+    T: list[list[float]]            # 4x4 world transform (UE world space as ingested)
+    fov_h_deg: float
+    focus_m: float | None = None
+
+    @field_validator("T")
+    @classmethod
+    def _check_4x4(cls, v: list[list[float]]) -> list[list[float]]:
+        if len(v) != 4 or any(len(row) != 4 for row in v):
+            raise ValueError("T must be a 4x4 matrix")
+        return v
+
+
+class CameraTrack(BaseModel):
+    schema_: str = Field(default="vcam.track/1", alias="schema")
+    fps: float
+    camera: str
+    frames: list[Frame]
+
+    model_config = {"populate_by_name": True}
+
+
+class StagePose(BaseModel):
+    pivot: tuple[float, float, float]
+    rotation: tuple[float, float, float]   # (elevation, heading, roll) degrees
+    distance: float
+    fov_deg: float
+    zoom_scale: float | None = None
+
+
+class ACCKeyframe(BaseModel):
+    idx: int
+    t_sec: float
+    pose: StagePose
+
+
+class Calibration(BaseModel):
+    module_type: str | None = None
+    field_map: dict[str, str] = Field(default_factory=dict)
+    forward_axis: str = "+X"               # UE camera local forward (X-forward)
+    euler_order: str = "XYZ"
+    handedness: int = 1
+    fov_axis: str = "horizontal"
+    linear_key_type: Any | None = None
+    M_ue2dis: list[list[float]] | None = None   # 4x4; None -> default base transform
+    aspect: float = 16.0 / 9.0
+    legacy_vc: bool = False
+    zoom_scale_neutral: float = 1.0
+
+
+class Tolerances(BaseModel):
+    pos_m: float = 0.001
+    rot_deg: float = 0.05
+    fov_deg: float = 0.05
+
+
+class Config(BaseModel):
+    director: str | None = None
+    calibration: Calibration = Field(default_factory=Calibration)
+    tolerances: Tolerances = Field(default_factory=Tolerances)
+    chunk_size: int = 200

@@ -22,3 +22,31 @@ def test_convert_dry_run_fov_horizontal_passthrough(sample_track_json):
     _, data = convert_dry_run(str(sample_track_json), config=cfg,
                               layer_uid="0xabc", fov_axis="horizontal")
     assert data["dry_run_plan"]["keyframes"][0]["fov"] == 60.0
+
+
+def test_main_convert_dry_run_json(sample_track_json, capsys):
+    from vcam_bridge.cli.main import main
+    rc = main(["convert", "--fbx", str(sample_track_json),
+               "--target-uid", "0xabc", "--dry-run", "--output", "json"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    import json
+    env = json.loads(out)
+    assert env["status"] == "ok"
+    assert env["operation_id"] == "convert"
+    assert env["data"]["dry_run_plan"]["frame_count"] == 2
+
+
+def test_main_manifest_json(capsys):
+    from vcam_bridge.cli.main import main
+    rc = main(["manifest", "--output", "json"])
+    assert rc == 0
+    import json
+    env = json.loads(capsys.readouterr().out)
+    assert env["data"]["contract_version"] == "1.0"
+
+
+def test_main_bad_args_exit_2(capsys):
+    from vcam_bridge.cli.main import main
+    rc = main(["convert", "--output", "json"])   # missing required --fbx
+    assert rc == 2

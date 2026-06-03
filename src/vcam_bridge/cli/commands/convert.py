@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 import numpy as np
 
-from vcam_bridge.config import load_config  # noqa: F401 (re-exported convenience)
 from vcam_bridge.domain.models import Config
 from vcam_bridge.ingest.intermediate import load_intermediate
 from vcam_bridge.transform.register import default_M, apply_M
@@ -33,7 +32,6 @@ def convert_dry_run(fbx_or_intermediate: str, *, config: Config,
     M = np.array(cal.M_ue2dis, dtype=float) if cal.M_ue2dis else default_M()
 
     keyframes = []
-    keys_payload = []
     for fr in track.frames:
         T_ue = np.array(fr.T, dtype=float)
         C, R = _stage_pose_for_frame(T_ue, M, cal)
@@ -46,9 +44,6 @@ def convert_dry_run(fbx_or_intermediate: str, *, config: Config,
             "pivot": pose["pivot"], "rotation": pose["rotation"],
             "distance": pose["distance"], "fov": fov,
         })
-        # beat is resolved live at inject time (needs track.timeToBeat); use t_sec here
-        keys_payload.append({"beat_from_t_sec": fr.t_sec,
-                             "values": {"fov": fov, "distance": pose["distance"]}})
 
     field_map = cal.field_map or {"fov": "fieldOfView", "distance": "distance"}
     inject_payload = {"layer_uid": layer_uid, "fields": field_map, "keys": []}

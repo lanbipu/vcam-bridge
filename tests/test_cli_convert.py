@@ -50,3 +50,15 @@ def test_main_bad_args_exit_2(capsys):
     from vcam_bridge.cli.main import main
     rc = main(["convert", "--output", "json"])   # missing required --fbx
     assert rc == 2
+
+
+def test_main_convert_missing_fbx_error_envelope(tmp_path, capsys):
+    from vcam_bridge.cli.main import main
+    rc = main(["convert", "--fbx", str(tmp_path / "nope.json"),
+               "--target-uid", "0xabc", "--dry-run", "--output", "json"])
+    assert rc == 13
+    import json
+    env = json.loads(capsys.readouterr().out)
+    assert env["status"] == "error"
+    assert env["error"]["code"] == "INVALID_FBX"
+    assert env["error"]["exit_code"] == 13

@@ -4,18 +4,20 @@ import json
 import re
 
 _UID_RE = re.compile(r"^0x[0-9a-fA-F]+$")
-_FIELD_RE = re.compile(r"^[A-Za-z0-9_.]+$")
+_FIELD_RE = re.compile(r"^[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)*$")
 
 # Fixed Python 2.7 body. Reads only `payload`; no dynamic values are interpolated
 # into code. Field names / uids are DATA passed to findSequence / uid lookup.
-# Must stay Py2.7-safe: no comprehensions, no walrus, no print().
+# Keep Py3-only syntax OUT (f-strings, walrus :=, type hints, async/await, yield from);
+# comprehensions are valid Py2.7 but we use plain for-loops so this body also survives
+# the designer-plugin AST converter path if it is ever used.
 INJECT_BODY = '''
 local_state = state.localOrDirectorState()
 track = local_state.track
 target = None
-for l in track.layers:
-    if hex(l.uid) == payload["layer_uid"]:
-        target = l
+for layer in track.layers:
+    if layer.uid == int(payload["layer_uid"], 16):
+        target = layer
         break
 if target is None:
     result = {"ok": False, "error": "layer not found"}

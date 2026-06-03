@@ -14,6 +14,13 @@ def test_umeyama_recovers_known_similarity():
     assert np.allclose(out, dst, atol=1e-9)
 
 
+def test_umeyama_degenerate_raises():
+    import pytest
+    pts = np.zeros((4, 3))
+    with pytest.raises(ValueError):
+        umeyama(pts, pts)
+
+
 def test_default_M_is_4x4_and_scales_cm_to_m():
     M = default_M()
     assert M.shape == (4, 4)

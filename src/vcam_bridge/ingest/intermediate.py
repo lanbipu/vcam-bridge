@@ -48,7 +48,7 @@ def _load_csv(path: Path, euler_order: str) -> CameraTrack:
                 (row["rx"], row["ry"], row["rz"]),
                 row["fov_h_deg"], row.get("focus_m"), euler_order))
     fps = 1.0 / (frames[1].t_sec - frames[0].t_sec) if len(frames) >= 2 and frames[1].t_sec > frames[0].t_sec else 30.0
-    return CameraTrack(fps=round(fps), camera="Camera", frames=frames)
+    return CameraTrack(fps=float(fps), camera="Camera", frames=frames)
 
 
 def load_intermediate(path: str, *, euler_order: str) -> CameraTrack:

@@ -20,6 +20,8 @@ def umeyama(src: np.ndarray, dst: np.ndarray) -> np.ndarray:
         S[-1, -1] = -1.0
     R = U @ S @ Vt
     var_s = (sc ** 2).sum() / n
+    if var_s < 1e-15:
+        raise ValueError("degenerate source points: zero variance")
     scale = float(np.trace(np.diag(D) @ S) / var_s)
     t = mu_d - scale * (R @ mu_s)
     M = np.eye(4)

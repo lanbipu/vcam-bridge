@@ -16,3 +16,12 @@ def test_load_from_yaml(tmp_path):
     assert cfg.chunk_size == 50
     assert cfg.director == "host:80"
     assert cfg.calibration.euler_order == "ZYX"
+
+
+def test_load_rejects_bad_M_shape(tmp_path):
+    import pytest
+    from vcam_bridge.domain.errors import ConfigError
+    p = tmp_path / "c.yaml"
+    p.write_text("calibration:\n  M_ue2dis: [[1,0,0],[0,1,0],[0,0,1]]\n")
+    with pytest.raises(ConfigError):
+        load_config(str(p))

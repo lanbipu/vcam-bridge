@@ -9,8 +9,8 @@ from typing import Any
 from vcam_bridge.cli import render, runtime
 from vcam_bridge.cli.commands import meta as meta_cmd
 from vcam_bridge.config import load_config
-from vcam_bridge.domain.errors import VcamError
-from vcam_bridge.envelope import EXIT_OK, EXIT_USAGE, error_envelope, success_envelope
+from vcam_bridge.domain.errors import ConfigError, VcamError
+from vcam_bridge.envelope import EXIT_OK, EXIT_RUNTIME, EXIT_USAGE, error_envelope, success_envelope
 
 
 def _add_global(parser: argparse.ArgumentParser, *, suppress: bool = False) -> None:
@@ -58,10 +58,17 @@ def _dispatch(args: argparse.Namespace) -> tuple[str, Any]:
     if args.command == "convert":
         cfg = load_config(args.config)
         const = None
-        if args.pivot_distance and args.pivot_distance.startswith("const="):
-            const = float(args.pivot_distance.split("=", 1)[1])
+        if args.pivot_distance and args.pivot_distance != "focus":
+            if not args.pivot_distance.startswith("const="):
+                raise ConfigError("--pivot-distance must be 'focus' or 'const=<meters>'",
+                                  details={"value": args.pivot_distance})
+            raw = args.pivot_distance.split("=", 1)[1]
+            try:
+                const = float(raw)
+            except ValueError as exc:
+                raise ConfigError("--pivot-distance const value must be a number, got %r" % raw,
+                                  details={"value": args.pivot_distance}) from exc
         if not args.dry_run:
-            from vcam_bridge.domain.errors import ConfigError
             raise ConfigError("live injection is implemented in Plan 2; use --dry-run")
         from vcam_bridge.cli.commands import convert as convert_cmd
         return convert_cmd.convert_dry_run(args.fbx, config=cfg, layer_uid=args.target_uid,
@@ -80,6 +87,10 @@ def main(argv: list[str] | None = None) -> int:
     request_id = runtime.new_request_id()
     timestamp = runtime.utc_now_iso()
     started = time.monotonic()
+
+    def _elapsed() -> int:
+        return int((time.monotonic() - started) * 1000)
+
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
@@ -95,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         op, data = _dispatch(args)
         env = success_envelope(op, data, request_id=request_id,
-                               duration_ms=int((time.monotonic() - started) * 1000),
+                               duration_ms=_elapsed(),
                                timestamp=timestamp)
         sys.stdout.write(render.render_success(env, fmt) + "\n")
         return EXIT_OK
@@ -103,10 +114,18 @@ def main(argv: list[str] | None = None) -> int:
         env = error_envelope(op_id, code=exc.code, exit_code=exc.exit_code,
                              message=exc.message, retryable=exc.retryable, details=exc.details,
                              request_id=request_id,
-                             duration_ms=int((time.monotonic() - started) * 1000),
+                             duration_ms=_elapsed(),
                              timestamp=timestamp)
         sys.stdout.write(render.render_error(env, fmt) + "\n")
         return exc.exit_code
+    except KeyboardInterrupt:
+        return 130
+    except Exception as exc:  # never crash with a raw traceback; emit a structured envelope
+        env = error_envelope(op_id, code="INTERNAL", exit_code=EXIT_RUNTIME, message=str(exc),
+                             retryable=False, details={"type": type(exc).__name__},
+                             request_id=request_id, duration_ms=_elapsed(), timestamp=timestamp)
+        sys.stdout.write(render.render_error(env, fmt) + "\n")
+        return EXIT_RUNTIME
 
 
 if __name__ == "__main__":

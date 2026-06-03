@@ -55,6 +55,15 @@ class Calibration(BaseModel):
     legacy_vc: bool = False
     zoom_scale_neutral: float = 1.0
 
+    @field_validator("M_ue2dis")
+    @classmethod
+    def _check_M_4x4(cls, v):
+        if v is None:
+            return v
+        if len(v) != 4 or any(len(row) != 4 for row in v):
+            raise ValueError("M_ue2dis must be a 4x4 matrix")
+        return v
+
 
 class Tolerances(BaseModel):
     pos_m: float = 0.001

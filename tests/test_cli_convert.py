@@ -68,10 +68,9 @@ def test_stage_pose_default_transform_not_mirrored():
     import numpy as np
     from vcam_bridge.cli.commands.convert import _stage_pose_for_frame
     from vcam_bridge.transform.register import default_M
-    from vcam_bridge.domain.models import Calibration
     T = np.eye(4)
     T[:3, 3] = [100.0, 0.0, 0.0]   # UE camera at +100cm X
-    C, R = _stage_pose_for_frame(T, default_M(), Calibration())
+    C, R = _stage_pose_for_frame(T, default_M())
     assert C[0] > 0                                   # +X stays +X (not mirrored)
     assert np.isclose(np.linalg.det(R), 1.0, atol=1e-9)   # proper rotation
 
@@ -89,3 +88,36 @@ def test_convert_dry_run_inject_script_has_populated_keys(sample_track_json):
     assert "fov" in pl["keys"][0]["values"]
     assert "pivot.x" in pl["keys"][0]["values"]
     assert "timeToBeat" in data["inject_script"]
+
+
+def test_main_pivot_distance_invalid(sample_track_json, capsys):
+    import json
+    from vcam_bridge.cli.main import main
+    rc = main(["convert", "--fbx", str(sample_track_json), "--target-uid", "0xabc",
+               "--dry-run", "--pivot-distance", "const=", "--output", "json"])
+    assert rc == 3
+    env = json.loads(capsys.readouterr().out)
+    assert env["status"] == "error"
+    assert env["error"]["code"] == "CONFIG_ERROR"
+
+
+def test_convert_rejects_partial_field_map(sample_track_json):
+    import pytest
+    from vcam_bridge.domain.models import Config, Calibration
+    from vcam_bridge.domain.errors import ConfigError
+    from vcam_bridge.cli.commands.convert import convert_dry_run
+    cfg = Config(calibration=Calibration(field_map={"pivot.x": "camera_pivot.x"}))
+    with pytest.raises(ConfigError):
+        convert_dry_run(str(sample_track_json), config=cfg, layer_uid="0xabc")
+
+
+def test_focus_m_zero_is_used_not_defaulted(tmp_path):
+    import json
+    from vcam_bridge.config import load_config
+    from vcam_bridge.cli.commands.convert import convert_dry_run
+    p = tmp_path / "t.json"
+    p.write_text(json.dumps({"fps": 30, "camera": "c", "frames": [
+        {"idx": 0, "t_sec": 0.0, "position": [0, 0, 0], "rotation_deg": [0, 0, 0],
+         "fov_h_deg": 60, "focus_m": 0.0}]}))
+    _, data = convert_dry_run(str(p), config=load_config(None), layer_uid="0xabc")
+    assert data["dry_run_plan"]["keyframes"][0]["distance"] == 0.0

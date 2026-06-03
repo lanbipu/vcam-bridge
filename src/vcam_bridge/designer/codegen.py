@@ -65,6 +65,11 @@ def build_inject_script(payload: dict) -> str:
     validate_uid(payload["layer_uid"])
     for key, decorated in payload["fields"].items():
         validate_field_name(decorated)
+    field_keys = set(payload["fields"].keys())
+    for kf in payload.get("keys", []):
+        for vk in kf.get("values", {}):
+            if vk not in field_keys:
+                raise ValueError("inject key %r has no field mapping" % vk)
     json_str = json.dumps(payload)
     header = "import json\npayload = json.loads(" + repr(json_str) + ")\n"
     return header + INJECT_BODY + "\nreturn json.dumps(result)\n"

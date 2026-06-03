@@ -37,7 +37,10 @@ def test_script_valid_as_designer_function_body():
 
 def test_injection_attempt_cannot_break_out():
     evil = dict(_payload())
-    evil["fields"] = {"a\"b\n'); import os; os.system('x') #": "x"}
+    evil_field_key = "a\"b\n'); import os; os.system('x') #"
+    evil["fields"] = {evil_field_key: "x"}
+    # keys must reference only the field key that exists in fields
+    evil["keys"] = [{"t_sec": 1.0, "values": {evil_field_key: 1.5}}]
     script = build_inject_script(evil)
     ast.parse(script)                       # still valid python, no code escape
     m = re.search(r"payload = json\.loads\((.*)\)\n", script)
@@ -71,3 +74,11 @@ def test_validate_field_name():
         validate_field_name("a..b")
     with pytest.raises(ValueError):
         validate_field_name("trailing.")
+
+
+def test_build_inject_script_rejects_unmapped_value_key():
+    payload = {"layer_uid": "0x1", "start_offset_sec": 0.0,
+               "fields": {"fov": "fieldOfView"},
+               "keys": [{"t_sec": 0.0, "values": {"fov": 60.0, "pivot.x": 1.0}}]}
+    with pytest.raises(ValueError):
+        build_inject_script(payload)

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 import numpy as np
 
+from vcam_bridge.domain.errors import ConfigError
 from vcam_bridge.domain.models import Config
 from vcam_bridge.ingest.intermediate import load_intermediate
 from vcam_bridge.transform.register import default_M, apply_M
@@ -10,8 +11,10 @@ from vcam_bridge.transform.decompose import decompose_pivot_orbit
 from vcam_bridge.transform.fov import map_fov
 from vcam_bridge.designer.codegen import build_inject_script
 
+_CANONICAL_FIELDS = ("pivot.x", "pivot.y", "pivot.z", "rotation.x", "rotation.y", "rotation.z", "distance", "fov")
 
-def _stage_pose_for_frame(T_ue: np.ndarray, M: np.ndarray, cal) -> tuple[np.ndarray, np.ndarray]:
+
+def _stage_pose_for_frame(T_ue: np.ndarray, M: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Apply M_ue2dis to the camera position and rotation. Returns (C_stage, R_stage).
     Extracts the nearest PROPER rotation via SVD so a reflection/handedness component
     in M never silently mirrors the orientation."""
@@ -41,8 +44,8 @@ def convert_dry_run(fbx_or_intermediate: str, *, config: Config,
     keyframes = []
     for fr in track.frames:
         T_ue = np.array(fr.T, dtype=float)
-        C, R = _stage_pose_for_frame(T_ue, M, cal)
-        d = pivot_distance_const if pivot_distance_const is not None else (fr.focus_m or 1.0)
+        C, R = _stage_pose_for_frame(T_ue, M)
+        d = pivot_distance_const if pivot_distance_const is not None else (fr.focus_m if fr.focus_m is not None else 1.0)
         pose = decompose_pivot_orbit(C, R, d, forward_axis=cal.forward_axis,
                                      euler_order=cal.euler_order)
         fov = map_fov(fr.fov_h_deg, fov_axis=fov_axis, aspect=cal.aspect)
@@ -67,6 +70,10 @@ def convert_dry_run(fbx_or_intermediate: str, *, config: Config,
                 "rotation.z": kf["rotation"][2], "distance": kf["distance"], "fov": kf["fov"],
             },
         })
+    missing_fields = [k for k in _CANONICAL_FIELDS if k not in field_map]
+    if missing_fields:
+        raise ConfigError("calibration.field_map is missing required canonical keys",
+                          details={"missing": missing_fields})
     inject_payload = {"layer_uid": layer_uid, "start_offset_sec": 0.0,
                       "fields": field_map, "keys": keys}
     inject_script = build_inject_script(inject_payload)

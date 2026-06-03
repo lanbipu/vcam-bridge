@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -9,6 +10,8 @@ import numpy as np
 from vcam_bridge.domain.errors import InvalidFbxError
 from vcam_bridge.domain.models import CameraTrack, Frame
 from vcam_bridge.transform.rotation import euler_to_matrix
+
+_LOG = logging.getLogger("vcam_bridge.ingest")
 
 
 def _frame_from_components(idx: int, t_sec: float, pos, rot_deg, fov_h_deg,
@@ -47,7 +50,11 @@ def _load_csv(path: Path, euler_order: str) -> CameraTrack:
                 (row["x"], row["y"], row["z"]),
                 (row["rx"], row["ry"], row["rz"]),
                 row["fov_h_deg"], row.get("focus_m"), euler_order))
-    fps = 1.0 / (frames[1].t_sec - frames[0].t_sec) if len(frames) >= 2 and frames[1].t_sec > frames[0].t_sec else 30.0
+    if len(frames) >= 2 and frames[1].t_sec > frames[0].t_sec:
+        fps = 1.0 / (frames[1].t_sec - frames[0].t_sec)
+    else:
+        _LOG.warning("CSV fps could not be inferred from frame timestamps; defaulting to 30.0")
+        fps = 30.0
     return CameraTrack(fps=float(fps), camera="Camera", frames=frames)
 
 

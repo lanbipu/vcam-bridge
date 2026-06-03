@@ -9,6 +9,7 @@ def test_cli_subcommands_subset_of_manifest():
     manifest_ops = {op["operation_id"] for op in build_manifest()["operations"]}
     # each implemented CLI command maps to a manifest operation_id
     mapping = {"convert": "convert", "manifest": "meta.manifest",
-               "version": "meta.version", "schema": "meta.schema"}
+               "version": "meta.version", "schema": "meta.schema",
+               "targets": "targets.list", "vc": "vc.list", "probe": "probe"}
     for cmd in cli_cmds:
         assert mapping[cmd] in manifest_ops

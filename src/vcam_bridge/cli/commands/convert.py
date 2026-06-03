@@ -5,13 +5,33 @@ import numpy as np
 
 from vcam_bridge.domain.errors import ConfigError
 from vcam_bridge.domain.models import Config
-from vcam_bridge.ingest.intermediate import load_intermediate
 from vcam_bridge.transform.register import default_M, apply_M
 from vcam_bridge.transform.decompose import decompose_pivot_orbit
 from vcam_bridge.transform.fov import map_fov
 from vcam_bridge.designer.codegen import build_inject_script
 
 _CANONICAL_FIELDS = ("pivot.x", "pivot.y", "pivot.z", "rotation.x", "rotation.y", "rotation.z", "distance", "fov")
+
+# Py2.7-safe script: find ACC layer by uid, try to disable Camera sequencing, return ok.
+_SET_TARGET_SCRIPT = '''
+import json
+local_state = state.localOrDirectorState()
+layer = None
+for l in local_state.track.layers:
+    if l.uid == int(%r, 16):
+        layer = l
+        break
+note = "ok"
+if layer is None:
+    return json.dumps({"ok": False, "error": "acc layer not found"})
+try:
+    cam_seq = layer.findSequence("Camera")
+    if cam_seq is not None:
+        cam_seq.disableSequencing = True
+except Exception as e:
+    note = "target-set-skipped: " + str(e)
+return json.dumps({"ok": True, "note": note})
+'''
 
 
 def _stage_pose_for_frame(T_ue: np.ndarray, M: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -33,12 +53,27 @@ def _stage_pose_for_frame(T_ue: np.ndarray, M: np.ndarray) -> tuple[np.ndarray, 
     return C_stage, R_stage
 
 
-def convert_dry_run(fbx_or_intermediate: str, *, config: Config,
-                    layer_uid: str, fov_axis: str | None = None,
-                    pivot_distance_const: float | None = None) -> tuple[str, Any]:
+def _load_track(path: str, *, euler_order: str, blender_path: str | None = None):
+    """Load a camera track from either an intermediate file (CSV/JSON) or FBX via Blender."""
+    if path.lower().endswith(".fbx"):
+        from vcam_bridge.ingest.blender_fbx import extract_fbx
+        return extract_fbx(path, blender_path=blender_path)
+    from vcam_bridge.ingest.intermediate import load_intermediate
+    return load_intermediate(path, euler_order=euler_order)
+
+
+def build_keyframes(track, config: Config, *, fov_axis: str | None = None,
+                    pivot_distance_const: float | None = None) -> tuple[dict, list, list]:
+    """Extract keyframe data from a track + config.
+
+    Returns:
+        (field_map, keys, keyframes)
+        - field_map: canonical -> designer field name mapping
+        - keys: list of {t_sec, values} dicts for inject_keys
+        - keyframes: list of {idx, t_sec, pivot, rotation, distance, fov} for dry_run_plan
+    """
     cal = config.calibration
-    fov_axis = fov_axis or cal.fov_axis
-    track = load_intermediate(fbx_or_intermediate, euler_order=cal.euler_order)
+    effective_fov_axis = fov_axis or cal.fov_axis
     M = np.array(cal.M_ue2dis, dtype=float) if cal.M_ue2dis else default_M()
 
     keyframes = []
@@ -48,7 +83,7 @@ def convert_dry_run(fbx_or_intermediate: str, *, config: Config,
         d = pivot_distance_const if pivot_distance_const is not None else (fr.focus_m if fr.focus_m is not None else 1.0)
         pose = decompose_pivot_orbit(C, R, d, forward_axis=cal.forward_axis,
                                      euler_order=cal.euler_order)
-        fov = map_fov(fr.fov_h_deg, fov_axis=fov_axis, aspect=cal.aspect)
+        fov = map_fov(fr.fov_h_deg, fov_axis=effective_fov_axis, aspect=cal.aspect)
         keyframes.append({
             "idx": fr.idx, "t_sec": fr.t_sec,
             "pivot": pose["pivot"], "rotation": pose["rotation"],
@@ -60,6 +95,7 @@ def convert_dry_run(fbx_or_intermediate: str, *, config: Config,
         "rotation.x": "camera_rotation.x", "rotation.y": "camera_rotation.y",
         "rotation.z": "camera_rotation.z", "distance": "distance", "fov": "fieldOfView",
     }
+
     keys = []
     for kf in keyframes:
         keys.append({
@@ -70,10 +106,24 @@ def convert_dry_run(fbx_or_intermediate: str, *, config: Config,
                 "rotation.z": kf["rotation"][2], "distance": kf["distance"], "fov": kf["fov"],
             },
         })
+
     missing_fields = [k for k in _CANONICAL_FIELDS if k not in field_map]
     if missing_fields:
         raise ConfigError("calibration.field_map is missing required canonical keys",
                           details={"missing": missing_fields})
+
+    return field_map, keys, keyframes
+
+
+def convert_dry_run(fbx_or_intermediate: str, *, config: Config,
+                    layer_uid: str, fov_axis: str | None = None,
+                    pivot_distance_const: float | None = None) -> tuple[str, Any]:
+    cal = config.calibration
+    track = _load_track(fbx_or_intermediate, euler_order=cal.euler_order,
+                        blender_path=getattr(config, "blender_path", None))
+    field_map, keys, keyframes = build_keyframes(track, config, fov_axis=fov_axis,
+                                                 pivot_distance_const=pivot_distance_const)
+
     inject_payload = {"layer_uid": layer_uid, "start_offset_sec": 0.0,
                       "fields": field_map, "keys": keys}
     inject_script = build_inject_script(inject_payload)
@@ -82,7 +132,7 @@ def convert_dry_run(fbx_or_intermediate: str, *, config: Config,
         "dry_run_plan": {
             "frame_count": len(track.frames),
             "fps": track.fps,
-            "fov_axis": fov_axis,
+            "fov_axis": fov_axis or cal.fov_axis,
             "keyframes": keyframes,
             "note": ("field map names and start_offset_sec are placeholders resolved live in "
                      "Plan 2 (P2 field map; --start-tc/--at-playhead); beats are computed "
@@ -91,3 +141,32 @@ def convert_dry_run(fbx_or_intermediate: str, *, config: Config,
         "inject_script": inject_script,
     }
     return "convert", data
+
+
+def convert_live(transport, *, host: str, fbx: str, config: Config,
+                 layer_uid: str, vc_uid: str, fov_axis: str | None = None,
+                 pivot_distance_const: float | None = None,
+                 start_offset_sec: float = 0.0,
+                 chunk_size: int | None = None) -> tuple[str, Any]:
+    from vcam_bridge.designer.client import DesignerClient
+    from vcam_bridge.designer.inject import inject_keys
+
+    cal = config.calibration
+    track = _load_track(fbx, euler_order=cal.euler_order,
+                        blender_path=getattr(config, "blender_path", None))
+    field_map, keys, _ = build_keyframes(track, config, fov_axis=fov_axis,
+                                         pivot_distance_const=pivot_distance_const)
+
+    client = DesignerClient(transport, host)
+    client.resolve_routing()
+
+    # Set Camera target = VC and coordinate system = Global on the ACC layer
+    setup = _SET_TARGET_SCRIPT % layer_uid
+    client.execute(setup)
+
+    effective_chunk_size = chunk_size if chunk_size is not None else config.chunk_size
+    written = inject_keys(client, layer_uid=layer_uid, fields=field_map, keys=keys,
+                          start_offset_sec=start_offset_sec,
+                          chunk_size=effective_chunk_size)
+    return "convert", {"written": written, "frames": len(keys), "vc_uid": vc_uid,
+                       "layer_uid": layer_uid}

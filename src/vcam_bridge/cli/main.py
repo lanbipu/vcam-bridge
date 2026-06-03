@@ -37,10 +37,25 @@ def build_parser() -> argparse.ArgumentParser:
     p_conv.add_argument("--target-uid", required=True)
     p_conv.add_argument("--vc-uid", default=None)
     p_conv.add_argument("--pivot-distance", default=None)
+    p_conv.add_argument("--chunk-size", type=int, default=None)
+    p_conv.add_argument("--verify", action="store_true", default=False)
 
     sub.add_parser("manifest", parents=[gp])
     sub.add_parser("version", parents=[gp])
     sub.add_parser("schema", parents=[gp])
+
+    # targets subcommand with nested "list"
+    p_targets = sub.add_parser("targets", parents=[gp])
+    p_targets.add_subparsers(dest="subcommand").add_parser("list", parents=[gp])
+
+    # vc subcommand with nested "list"
+    p_vc = sub.add_parser("vc", parents=[gp])
+    p_vc.add_subparsers(dest="subcommand").add_parser("list", parents=[gp])
+
+    # probe subcommand
+    p_probe = sub.add_parser("probe", parents=[gp])
+    p_probe.add_argument("--probe-layer-uid", required=True)
+
     return parser
 
 
@@ -55,6 +70,29 @@ def _dispatch(args: argparse.Namespace) -> tuple[str, Any]:
         return meta_cmd.version()
     if args.command == "schema":
         return meta_cmd.schema()
+
+    if args.command == "targets" and getattr(args, "subcommand", None) == "list":
+        if not args.director:
+            raise ConfigError("--director HOST:PORT is required")
+        from vcam_bridge.designer.transport import RequestsTransport
+        from vcam_bridge.cli.commands import targets as targets_cmd
+        return targets_cmd.list_targets(RequestsTransport(), host=args.director)
+
+    if args.command == "vc" and getattr(args, "subcommand", None) == "list":
+        if not args.director:
+            raise ConfigError("--director HOST:PORT is required")
+        from vcam_bridge.designer.transport import RequestsTransport
+        from vcam_bridge.cli.commands import vc as vc_cmd
+        return vc_cmd.list_vcams(RequestsTransport(), host=args.director)
+
+    if args.command == "probe":
+        if not args.director:
+            raise ConfigError("--director HOST:PORT is required")
+        from vcam_bridge.designer.transport import RequestsTransport
+        from vcam_bridge.cli.commands import probe as probe_cmd
+        return probe_cmd.run_probe(RequestsTransport(), host=args.director,
+                                   probe_layer_uid=args.probe_layer_uid)
+
     if args.command == "convert":
         cfg = load_config(args.config)
         const = None
@@ -68,17 +106,44 @@ def _dispatch(args: argparse.Namespace) -> tuple[str, Any]:
             except ValueError as exc:
                 raise ConfigError("--pivot-distance const value must be a number, got %r" % raw,
                                   details={"value": args.pivot_distance}) from exc
-        if not args.dry_run:
-            raise ConfigError("live injection is implemented in Plan 2; use --dry-run")
+
         from vcam_bridge.cli.commands import convert as convert_cmd
-        return convert_cmd.convert_dry_run(args.fbx, config=cfg, layer_uid=args.target_uid,
-                                           pivot_distance_const=const)
+
+        if args.dry_run:
+            return convert_cmd.convert_dry_run(args.fbx, config=cfg, layer_uid=args.target_uid,
+                                               pivot_distance_const=const)
+
+        # Live injection path
+        if not args.director:
+            raise ConfigError("--director HOST:PORT is required for live injection")
+        if not args.vc_uid:
+            raise ConfigError("--vc-uid is required for live injection")
+        from vcam_bridge.designer.transport import RequestsTransport
+        return convert_cmd.convert_live(
+            RequestsTransport(),
+            host=args.director,
+            fbx=args.fbx,
+            config=cfg,
+            layer_uid=args.target_uid,
+            vc_uid=args.vc_uid,
+            pivot_distance_const=const,
+            chunk_size=args.chunk_size,
+        )
+
     raise VcamError("no command given")
 
 
 def _op_id(args: argparse.Namespace) -> str:
-    return {"manifest": "meta.manifest", "version": "meta.version",
-            "schema": "meta.schema", "convert": "convert"}.get(args.command, "INTERNAL")
+    m = {
+        "manifest": "meta.manifest",
+        "version": "meta.version",
+        "schema": "meta.schema",
+        "convert": "convert",
+        "probe": "probe",
+        "targets": "targets.list",
+        "vc": "vc.list",
+    }
+    return m.get(args.command, "INTERNAL")
 
 
 def main(argv: list[str] | None = None) -> int:

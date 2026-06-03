@@ -23,3 +23,13 @@ def test_readonly_ops_not_destructive():
         op = next(o for o in m["operations"] if o["operation_id"] == oid)
         assert op["side_effects"]["writes"] is False
         assert op["side_effects"]["destructive"] is False
+
+
+def test_meta_commands_return_operation_and_data():
+    from vcam_bridge.cli.commands import meta
+    op, data = meta.manifest()
+    assert op == "meta.manifest"
+    assert data["contract_version"] == "1.0"
+    op2, data2 = meta.version()
+    assert op2 == "meta.version"
+    assert "version" in data2

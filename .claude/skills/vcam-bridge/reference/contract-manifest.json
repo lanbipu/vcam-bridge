@@ -1,0 +1,317 @@
+{
+  "contract_version": "1.0",
+  "operations": [
+    {
+      "operation_id": "convert",
+      "summary": "Convert FBX camera animation and inject as ACC keyframes",
+      "input_schema": {
+        "$ref": "#/schemas/convert/input"
+      },
+      "output_schema": {
+        "$ref": "#/schemas/convert/output"
+      },
+      "error_schema": {
+        "$ref": "#/schemas/error"
+      },
+      "side_effects": {
+        "writes": true,
+        "external_calls": true,
+        "idempotent": true,
+        "destructive": true
+      },
+      "exit_codes": [
+        0,
+        2,
+        3,
+        5,
+        7,
+        8,
+        11,
+        13
+      ],
+      "cli": {
+        "supports_dry_run": true,
+        "supports_stdin": true
+      }
+    },
+    {
+      "operation_id": "probe",
+      "summary": "Calibrate Designer conventions (P0-P9) on a scratch ACC layer",
+      "input_schema": {
+        "$ref": "#/schemas/probe/input"
+      },
+      "output_schema": {
+        "$ref": "#/schemas/probe/output"
+      },
+      "error_schema": {
+        "$ref": "#/schemas/error"
+      },
+      "side_effects": {
+        "writes": true,
+        "external_calls": true,
+        "idempotent": false,
+        "destructive": true
+      },
+      "exit_codes": [
+        0,
+        2,
+        3,
+        4,
+        8,
+        10,
+        12
+      ],
+      "cli": {
+        "supports_dry_run": true,
+        "supports_stdin": false
+      }
+    },
+    {
+      "operation_id": "targets.list",
+      "summary": "Enumerate AnimateCameraControl layers",
+      "input_schema": {
+        "$ref": "#/schemas/targets.list/input"
+      },
+      "output_schema": {
+        "$ref": "#/schemas/targets.list/output"
+      },
+      "error_schema": {
+        "$ref": "#/schemas/error"
+      },
+      "side_effects": {
+        "writes": false,
+        "external_calls": true,
+        "idempotent": true,
+        "destructive": false
+      },
+      "exit_codes": [
+        0,
+        2,
+        4,
+        8
+      ],
+      "cli": {
+        "supports_dry_run": false,
+        "supports_stdin": false
+      }
+    },
+    {
+      "operation_id": "vc.list",
+      "summary": "Enumerate Virtual Cameras in the stage",
+      "input_schema": {
+        "$ref": "#/schemas/vc.list/input"
+      },
+      "output_schema": {
+        "$ref": "#/schemas/vc.list/output"
+      },
+      "error_schema": {
+        "$ref": "#/schemas/error"
+      },
+      "side_effects": {
+        "writes": false,
+        "external_calls": true,
+        "idempotent": true,
+        "destructive": false
+      },
+      "exit_codes": [
+        0,
+        2,
+        4,
+        8
+      ],
+      "cli": {
+        "supports_dry_run": false,
+        "supports_stdin": false
+      }
+    },
+    {
+      "operation_id": "config.init",
+      "summary": "Write a default configuration file",
+      "input_schema": {
+        "$ref": "#/schemas/config.init/input"
+      },
+      "output_schema": {
+        "$ref": "#/schemas/config.init/output"
+      },
+      "error_schema": {
+        "$ref": "#/schemas/error"
+      },
+      "side_effects": {
+        "writes": true,
+        "external_calls": false,
+        "idempotent": true,
+        "destructive": false
+      },
+      "exit_codes": [
+        0,
+        2,
+        3,
+        6
+      ],
+      "cli": {
+        "supports_dry_run": true,
+        "supports_stdin": false
+      }
+    },
+    {
+      "operation_id": "config.show",
+      "summary": "Show the effective merged configuration",
+      "input_schema": {
+        "$ref": "#/schemas/config.show/input"
+      },
+      "output_schema": {
+        "$ref": "#/schemas/config.show/output"
+      },
+      "error_schema": {
+        "$ref": "#/schemas/error"
+      },
+      "side_effects": {
+        "writes": false,
+        "external_calls": false,
+        "idempotent": true,
+        "destructive": false
+      },
+      "exit_codes": [
+        0,
+        2,
+        3
+      ],
+      "cli": {
+        "supports_dry_run": false,
+        "supports_stdin": false
+      }
+    },
+    {
+      "operation_id": "config.validate",
+      "summary": "Validate a configuration file",
+      "input_schema": {
+        "$ref": "#/schemas/config.validate/input"
+      },
+      "output_schema": {
+        "$ref": "#/schemas/config.validate/output"
+      },
+      "error_schema": {
+        "$ref": "#/schemas/error"
+      },
+      "side_effects": {
+        "writes": false,
+        "external_calls": false,
+        "idempotent": true,
+        "destructive": false
+      },
+      "exit_codes": [
+        0,
+        2,
+        3
+      ],
+      "cli": {
+        "supports_dry_run": false,
+        "supports_stdin": false
+      }
+    },
+    {
+      "operation_id": "meta.manifest",
+      "summary": "Output the contract manifest",
+      "input_schema": {
+        "$ref": "#/schemas/meta.manifest/input"
+      },
+      "output_schema": {
+        "$ref": "#/schemas/meta.manifest/output"
+      },
+      "error_schema": {
+        "$ref": "#/schemas/error"
+      },
+      "side_effects": {
+        "writes": false,
+        "external_calls": false,
+        "idempotent": true,
+        "destructive": false
+      },
+      "exit_codes": [
+        0
+      ],
+      "cli": {
+        "supports_dry_run": false,
+        "supports_stdin": false
+      }
+    },
+    {
+      "operation_id": "meta.schema",
+      "summary": "Output the CLI structure JSON schema",
+      "input_schema": {
+        "$ref": "#/schemas/meta.schema/input"
+      },
+      "output_schema": {
+        "$ref": "#/schemas/meta.schema/output"
+      },
+      "error_schema": {
+        "$ref": "#/schemas/error"
+      },
+      "side_effects": {
+        "writes": false,
+        "external_calls": false,
+        "idempotent": true,
+        "destructive": false
+      },
+      "exit_codes": [
+        0
+      ],
+      "cli": {
+        "supports_dry_run": false,
+        "supports_stdin": false
+      }
+    },
+    {
+      "operation_id": "meta.version",
+      "summary": "Output version metadata",
+      "input_schema": {
+        "$ref": "#/schemas/meta.version/input"
+      },
+      "output_schema": {
+        "$ref": "#/schemas/meta.version/output"
+      },
+      "error_schema": {
+        "$ref": "#/schemas/error"
+      },
+      "side_effects": {
+        "writes": false,
+        "external_calls": false,
+        "idempotent": true,
+        "destructive": false
+      },
+      "exit_codes": [
+        0
+      ],
+      "cli": {
+        "supports_dry_run": false,
+        "supports_stdin": false
+      }
+    },
+    {
+      "operation_id": "meta.completion",
+      "summary": "Output shell completion script",
+      "input_schema": {
+        "$ref": "#/schemas/meta.completion/input"
+      },
+      "output_schema": {
+        "$ref": "#/schemas/meta.completion/output"
+      },
+      "error_schema": {
+        "$ref": "#/schemas/error"
+      },
+      "side_effects": {
+        "writes": false,
+        "external_calls": false,
+        "idempotent": true,
+        "destructive": false
+      },
+      "exit_codes": [
+        0
+      ],
+      "cli": {
+        "supports_dry_run": false,
+        "supports_stdin": false
+      }
+    }
+  ]
+}

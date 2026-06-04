@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+from scipy.spatial.transform import Rotation
 from vcam_bridge.transform.rotation import euler_to_matrix, matrix_to_euler
 
 _AXES = {"+X": [1, 0, 0], "-X": [-1, 0, 0], "+Y": [0, 1, 0],
@@ -13,22 +14,27 @@ def forward_vector(axis: str) -> np.ndarray:
     return np.array(_AXES[axis], dtype=float)
 
 
-def decompose_pivot_orbit(C: np.ndarray, R: np.ndarray, d: float, *,
-                          forward_axis: str, euler_order: str) -> dict:
-    """C: camera position (stage space, m). R: 3x3 world rotation. d: distance.
-    Returns {pivot:(3,), rotation:(elev,head,roll) deg, distance:d}."""
+def disguise_euler_to_matrix(elev_deg: float, heading_deg: float, roll_deg: float) -> np.ndarray:
+    return Rotation.from_euler('ZXY', [roll_deg, elev_deg, -heading_deg], degrees=True).as_matrix()
+
+
+def disguise_matrix_to_euler(R: np.ndarray) -> tuple[float, float, float]:
+    angles = Rotation.from_matrix(np.asarray(R, dtype=float)).as_euler('ZXY', degrees=True)
+    return (float(angles[1]), float(-angles[2]), float(angles[0]))
+
+
+def decompose_pivot_orbit(C, R, d, *, forward_axis, euler_order):
     C = np.asarray(C, dtype=float)
     R = np.asarray(R, dtype=float)
-    f = R @ forward_vector(forward_axis)
+    f = R.T @ forward_vector(forward_axis)
     pivot = C + d * f
-    rot = matrix_to_euler(R, euler_order)
-    return {"pivot": tuple(float(x) for x in pivot),
-            "rotation": rot, "distance": float(d)}
+    rot = disguise_matrix_to_euler(R)
+    return {"pivot": tuple(float(x) for x in pivot), "rotation": rot, "distance": float(d)}
 
 
-def recompose(pose: dict, *, forward_axis: str, euler_order: str) -> tuple[np.ndarray, np.ndarray]:
-    R = euler_to_matrix(pose["rotation"], euler_order)
-    f = R @ forward_vector(forward_axis)
+def recompose(pose, *, forward_axis, euler_order):
+    R = disguise_euler_to_matrix(*pose["rotation"])
+    f = R.T @ forward_vector(forward_axis)
     pivot = np.asarray(pose["pivot"], dtype=float)
     C = pivot - pose["distance"] * f
     return C, R

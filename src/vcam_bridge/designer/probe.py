@@ -14,7 +14,7 @@ if target is None:
     return json.dumps([])
 out = []
 for fs in target.fields:
-    out.append(str(fs))
+    out.append(fs.name)
 return json.dumps(out)
 '''
 

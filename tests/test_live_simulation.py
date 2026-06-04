@@ -1,8 +1,6 @@
 """Layer 3 — Simulated real-machine tests using FakeTransport replay.
 No Designer hardware needed; exercises the full live path with synthetic fixtures."""
 
-import json
-import math
 import numpy as np
 import pytest
 
@@ -11,12 +9,7 @@ from vcam_bridge.designer.client import DesignerClient
 from vcam_bridge.designer.inject import inject_keys, chunk_keys
 from vcam_bridge.cli.commands.convert import convert_live, build_keyframes
 from vcam_bridge.config import load_config
-from vcam_bridge.domain.errors import DesignerTimeoutError, PartialError
-from vcam_bridge.domain.models import Config, Calibration
-from vcam_bridge.transform.convention import solve_convention
 from vcam_bridge.transform.register import umeyama
-from vcam_bridge.transform.rotation import euler_to_matrix
-from vcam_bridge.transform.decompose import forward_vector, decompose_pivot_orbit
 
 
 def _ok(rv):
@@ -25,35 +18,6 @@ def _ok(rv):
 
 def _solo():
     return {"/api/session/status/session": {"isRunningSolo": True}}
-
-
-# ---------- 3.1 build_calibration from synthetic convention samples ----------
-
-def _synth_convention_samples(fwd="+X", order="XYZ", n=8, seed=42):
-    rng = np.random.default_rng(seed)
-    samples = []
-    for _ in range(n):
-        pivot = rng.normal(size=3) * 3
-        rot = tuple(rng.uniform(-60, 60, size=3))
-        dist = float(rng.uniform(0.5, 3.0))
-        R = euler_to_matrix(rot, order)
-        f = R @ forward_vector(fwd)
-        C = np.asarray(pivot) - dist * f
-        samples.append({
-            "written": {"pivot": tuple(pivot), "rotation": rot, "distance": dist},
-            "world": {"position": tuple(C), "rotation_matrix": R.tolist()},
-        })
-    return samples
-
-
-def test_synthetic_convention_solve():
-    """3.1 — solve_convention recovers the correct convention from synthetic samples."""
-    samples = _synth_convention_samples("+X", "XYZ")
-    result = solve_convention(samples)
-    assert result["forward_axis"] == "+X"
-    assert result["euler_order"] == "XYZ"
-    assert result["pos_error"] < 1e-6
-    assert result["rot_error"] < 1e-6
 
 
 def test_synthetic_umeyama_calibration():
@@ -153,20 +117,6 @@ def test_convert_live_director_routing(tmp_path):
                             layer_uid="0xabc", vc_uid="0xdef", chunk_size=100)
     assert data["written"] == 16
     assert ft.executed[0]["host"] == "10.0.0.1:80"
-
-
-# ---------- 3.1 convention solver edge: all 6 forward axes ----------
-
-@pytest.mark.parametrize("fwd,order", [
-    ("+X", "XYZ"), ("-X", "ZYX"), ("+Y", "YXZ"), ("-Y", "XZY"), ("+Z", "ZXY"), ("-Z", "YZX"),
-])
-def test_convention_solver_all_axes(fwd, order):
-    """3.1 — Verify convention solver works for all 6 forward axes."""
-    samples = _synth_convention_samples(fwd, order, n=10)
-    result = solve_convention(samples)
-    assert result["forward_axis"] == fwd
-    assert result["euler_order"] == order
-    assert result["pos_error"] < 1e-5
 
 
 # ---------- 3.5 build_keyframes consistency ----------

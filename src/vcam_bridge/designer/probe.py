@@ -13,7 +13,7 @@ for layer in local_state.track.layers:
 if target is None:
     return json.dumps([])
 out = []
-for fs in target.sequences:
+for fs in target.fields:
     out.append(str(fs))
 return json.dumps(out)
 '''

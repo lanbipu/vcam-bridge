@@ -45,15 +45,16 @@ class ACCKeyframe(BaseModel):
 class Calibration(BaseModel):
     module_type: str | None = None
     field_map: dict[str, str] = Field(default_factory=dict)
-    forward_axis: str = "+X"               # UE camera local forward (X-forward)
-    euler_order: str = "XYZ"
-    handedness: int = 1
+    forward_axis: str = "+Z"
+    euler_order: str = "disguise_zxy"
     fov_axis: str = "horizontal"
     linear_key_type: Any | None = None
     M_ue2dis: list[list[float]] | None = None   # 4x4; None -> default base transform
     aspect: float = 16.0 / 9.0
     legacy_vc: bool = False
     zoom_scale_neutral: float = 1.0
+    baseline_focal_mm: float = 30.296
+    sensor_width_mm: float = 35.0
 
     @field_validator("M_ue2dis")
     @classmethod

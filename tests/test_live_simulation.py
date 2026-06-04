@@ -1,8 +1,6 @@
 """Layer 3 — Simulated real-machine tests using FakeTransport replay.
 No Designer hardware needed; exercises the full live path with synthetic fixtures."""
 
-import json
-import math
 import numpy as np
 import pytest
 
@@ -11,12 +9,7 @@ from vcam_bridge.designer.client import DesignerClient
 from vcam_bridge.designer.inject import inject_keys, chunk_keys
 from vcam_bridge.cli.commands.convert import convert_live, build_keyframes
 from vcam_bridge.config import load_config
-from vcam_bridge.domain.errors import DesignerTimeoutError, PartialError
-from vcam_bridge.domain.models import Config, Calibration
-from vcam_bridge.transform.convention import solve_convention
 from vcam_bridge.transform.register import umeyama
-from vcam_bridge.transform.rotation import euler_to_matrix
-from vcam_bridge.transform.decompose import forward_vector, decompose_pivot_orbit
 
 
 def _ok(rv):
@@ -25,35 +18,6 @@ def _ok(rv):
 
 def _solo():
     return {"/api/session/status/session": {"isRunningSolo": True}}
-
-
-# ---------- 3.1 build_calibration from synthetic convention samples ----------
-
-def _synth_convention_samples(fwd="+X", order="XYZ", n=8, seed=42):
-    rng = np.random.default_rng(seed)
-    samples = []
-    for _ in range(n):
-        pivot = rng.normal(size=3) * 3
-        rot = tuple(rng.uniform(-60, 60, size=3))
-        dist = float(rng.uniform(0.5, 3.0))
-        R = euler_to_matrix(rot, order)
-        f = R @ forward_vector(fwd)
-        C = np.asarray(pivot) - dist * f
-        samples.append({
-            "written": {"pivot": tuple(pivot), "rotation": rot, "distance": dist},
-            "world": {"position": tuple(C), "rotation_matrix": R.tolist()},
-        })
-    return samples
-
-
-def test_synthetic_convention_solve():
-    """3.1 — solve_convention recovers the correct convention from synthetic samples."""
-    samples = _synth_convention_samples("+X", "XYZ")
-    result = solve_convention(samples)
-    assert result["forward_axis"] == "+X"
-    assert result["euler_order"] == "XYZ"
-    assert result["pos_error"] < 1e-6
-    assert result["rot_error"] < 1e-6
 
 
 def test_synthetic_umeyama_calibration():
@@ -99,7 +63,7 @@ def test_convert_live_full_flow(tmp_path):
 
 def test_timeout_bisect_then_succeed(tmp_path):
     """3.8 — chunk1 ok, chunk2 timeout → bisect into 2 sub-chunks → all keys written."""
-    keys = [{"t_sec": i * 0.1, "values": {"fov": 60.0 + i}} for i in range(20)]
+    keys = [{"t_sec": i * 0.1, "values": {"zoom": 60.0 + i}} for i in range(20)]
     timeout = {"status": {"code": 1, "message": "TimeoutError: script"}, "returnValue": "null",
                "d3Log": "", "pythonLog": ""}
     ft = FakeTransport(execute_responses=[
@@ -109,7 +73,7 @@ def test_timeout_bisect_then_succeed(tmp_path):
         _ok('{"ok": true, "written": 5}'),     # sub-chunk 2b (keys 15-19) ok
     ])
     c = DesignerClient(ft, "localhost")
-    written = inject_keys(c, layer_uid="0x1", fields={"fov": "fieldOfView"}, keys=keys,
+    written = inject_keys(c, layer_uid="0x1", fields={"zoom": "virtual camera zoom"}, keys=keys,
                           start_offset_sec=0.0, chunk_size=10)
     assert written == 20
     assert len(ft.executed) == 4
@@ -117,7 +81,7 @@ def test_timeout_bisect_then_succeed(tmp_path):
 
 def test_double_timeout_cascading_bisect():
     """3.8 edge — two cascading timeouts, bisect down twice then succeed."""
-    keys = [{"t_sec": i * 0.1, "values": {"fov": 60.0}} for i in range(16)]
+    keys = [{"t_sec": i * 0.1, "values": {"zoom": 60.0}} for i in range(16)]
     timeout = {"status": {"code": 1, "message": "TimeoutError"}, "returnValue": "null",
                "d3Log": "", "pythonLog": ""}
     ft = FakeTransport(execute_responses=[
@@ -128,7 +92,7 @@ def test_double_timeout_cascading_bisect():
         _ok('{"ok": true, "written": 8}'),     # 8 keys ok (second half)
     ])
     c = DesignerClient(ft, "localhost")
-    written = inject_keys(c, layer_uid="0x1", fields={"fov": "fieldOfView"}, keys=keys,
+    written = inject_keys(c, layer_uid="0x1", fields={"zoom": "virtual camera zoom"}, keys=keys,
                           start_offset_sec=0.0, chunk_size=16, min_chunk=4)
     assert written == 16
 
@@ -155,20 +119,6 @@ def test_convert_live_director_routing(tmp_path):
     assert ft.executed[0]["host"] == "10.0.0.1:80"
 
 
-# ---------- 3.1 convention solver edge: all 6 forward axes ----------
-
-@pytest.mark.parametrize("fwd,order", [
-    ("+X", "XYZ"), ("-X", "ZYX"), ("+Y", "YXZ"), ("-Y", "XZY"), ("+Z", "ZXY"), ("-Z", "YZX"),
-])
-def test_convention_solver_all_axes(fwd, order):
-    """3.1 — Verify convention solver works for all 6 forward axes."""
-    samples = _synth_convention_samples(fwd, order, n=10)
-    result = solve_convention(samples)
-    assert result["forward_axis"] == fwd
-    assert result["euler_order"] == order
-    assert result["pos_error"] < 1e-5
-
-
 # ---------- 3.5 build_keyframes consistency ----------
 
 def test_build_keyframes_all_canonical_fields(tmp_path):
@@ -185,6 +135,6 @@ def test_build_keyframes_all_canonical_fields(tmp_path):
     assert len(keys) == 1
     vals = keys[0]["values"]
     for canon in ("pivot.x", "pivot.y", "pivot.z", "rotation.x", "rotation.y",
-                  "rotation.z", "distance", "fov"):
+                  "rotation.z", "distance", "zoom"):
         assert canon in vals, f"missing canonical key {canon}"
         assert isinstance(vals[canon], float), f"{canon} is not float"

@@ -11,7 +11,7 @@ from vcam_bridge.config import load_config
 from vcam_bridge.domain.models import Config, Calibration
 from vcam_bridge.transform.register import default_M, apply_M
 from vcam_bridge.transform.decompose import decompose_pivot_orbit
-from vcam_bridge.transform.fov import map_fov
+from vcam_bridge.transform.fov import hfov_to_zoom
 
 
 def test_pipeline_identity_camera_at_origin(tmp_path):
@@ -22,10 +22,11 @@ def test_pipeline_identity_camera_at_origin(tmp_path):
          "fov_h_deg": 90.0, "focus_m": 2.0},
     ]}))
     cfg = load_config(None)
-    _, data = convert_dry_run(str(p), config=cfg, layer_uid="0x1", fov_axis="horizontal")
+    _, data = convert_dry_run(str(p), config=cfg, layer_uid="0x1")
 
     kf = data["dry_run_plan"]["keyframes"][0]
-    assert kf["fov"] == 90.0
+    expected_zoom = hfov_to_zoom(90.0, 30.296, 35.0)
+    assert abs(kf["zoom"] - expected_zoom) < 0.001
     assert kf["distance"] == 2.0
     assert len(kf["pivot"]) == 3
     assert len(kf["rotation"]) == 3
@@ -48,7 +49,7 @@ def test_pipeline_known_translation(tmp_path):
     pivot = np.array(kf["pivot"])
     M = default_M()
     C_expected = apply_M(M, np.array([[100, 0, 0]]))[0]
-    f_local = np.array([1, 0, 0])
+    f_local = np.array([0, 0, 1])
     Rm = M[:3, :3]
     scale = abs(np.linalg.det(Rm)) ** (1.0 / 3.0)
     R_only = Rm / scale
@@ -58,23 +59,8 @@ def test_pipeline_known_translation(tmp_path):
         U[:, -1] = -U[:, -1]
         R_lin = U @ Vt
     R_cam = R_lin @ np.eye(3)
-    f_stage = R_cam @ f_local
-    expected_pivot = C_expected + 1.0 * f_stage
+    expected_pivot = C_expected + 1.0 * (R_cam.T @ f_local)
     assert np.allclose(pivot, expected_pivot, atol=1e-6)
-
-
-def test_pipeline_fov_vertical_conversion(tmp_path):
-    """With fov_axis='vertical', FOV should be H→V converted."""
-    p = tmp_path / "t.json"
-    p.write_text(json.dumps({"fps": 30, "camera": "Cam", "frames": [
-        {"idx": 0, "t_sec": 0.0, "position": [0, 0, 0], "rotation_deg": [0, 0, 0],
-         "fov_h_deg": 90.0, "focus_m": 1.0},
-    ]}))
-    _, data = convert_dry_run(str(p), config=load_config(None), layer_uid="0x1",
-                              fov_axis="vertical")
-    kf = data["dry_run_plan"]["keyframes"][0]
-    expected = map_fov(90.0, fov_axis="vertical", aspect=16/9)
-    assert math.isclose(kf["fov"], expected, rel_tol=1e-9)
 
 
 def test_pipeline_multi_frame_monotonic_time(tmp_path):

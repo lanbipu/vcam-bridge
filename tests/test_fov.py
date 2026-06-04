@@ -41,3 +41,34 @@ def test_map_fov_invalid_axis():
 def test_ultrawide_v_smaller_than_h():
     v = h_to_v(120.0, 21/9)
     assert v < 120.0
+
+
+from vcam_bridge.transform.fov import hfov_to_zoom, zoom_to_hfov
+
+
+def test_hfov_to_zoom_fixture_values():
+    B = 30.296; S = 35.0
+    assert math.isclose(hfov_to_zoom(98.24, B, S), 0.5, abs_tol=0.01)
+    assert math.isclose(hfov_to_zoom(60.02, B, S), 1.0, abs_tol=0.01)
+    assert math.isclose(hfov_to_zoom(42.12, B, S), 1.5, abs_tol=0.01)
+    assert math.isclose(hfov_to_zoom(32.22, B, S), 2.0, abs_tol=0.01)
+
+
+def test_hfov_zoom_roundtrip():
+    B = 30.296; S = 35.0
+    for fov in [30, 45, 60, 75, 90, 120]:
+        z = hfov_to_zoom(float(fov), B, S)
+        back = zoom_to_hfov(z, B, S)
+        assert math.isclose(back, fov, abs_tol=0.01)
+
+
+def test_hfov_to_zoom_rejects_zero():
+    import pytest
+    with pytest.raises(ValueError):
+        hfov_to_zoom(0.0, 30.296, 35.0)
+
+
+def test_hfov_to_zoom_rejects_180():
+    import pytest
+    with pytest.raises(ValueError):
+        hfov_to_zoom(180.0, 30.296, 35.0)

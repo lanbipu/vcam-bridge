@@ -8,7 +8,7 @@ def test_load_default_when_none():
     cfg = load_config(None)
     assert isinstance(cfg, Config)
     assert cfg.chunk_size == 200
-    assert cfg.calibration.euler_order == "XYZ"
+    assert cfg.calibration.euler_order == "disguise_zxy"
 
 
 def test_load_from_yaml(tmp_path):

@@ -7,10 +7,10 @@ from vcam_bridge.domain.errors import ConfigError
 from vcam_bridge.domain.models import Config
 from vcam_bridge.transform.register import default_M, apply_M
 from vcam_bridge.transform.decompose import decompose_pivot_orbit
-from vcam_bridge.transform.fov import map_fov
+from vcam_bridge.transform.fov import hfov_to_zoom
 from vcam_bridge.designer.codegen import build_inject_script
 
-_CANONICAL_FIELDS = ("pivot.x", "pivot.y", "pivot.z", "rotation.x", "rotation.y", "rotation.z", "distance", "fov")
+_CANONICAL_FIELDS = ("pivot.x", "pivot.y", "pivot.z", "rotation.x", "rotation.y", "rotation.z", "distance", "zoom")
 
 _SET_TARGET_SCRIPT = '''
 import json
@@ -83,7 +83,7 @@ def _load_track(path: str, *, euler_order: str, blender_path: str | None = None)
     return load_intermediate(path, euler_order=euler_order)
 
 
-def build_keyframes(track, config: Config, *, fov_axis: str | None = None,
+def build_keyframes(track, config: Config, *,
                     pivot_distance_const: float | None = None) -> tuple[dict, list, list]:
     """Extract keyframe data from a track + config.
 
@@ -91,10 +91,9 @@ def build_keyframes(track, config: Config, *, fov_axis: str | None = None,
         (field_map, keys, keyframes)
         - field_map: canonical -> designer field name mapping
         - keys: list of {t_sec, values} dicts for inject_keys
-        - keyframes: list of {idx, t_sec, pivot, rotation, distance, fov} for dry_run_plan
+        - keyframes: list of {idx, t_sec, pivot, rotation, distance, zoom} for dry_run_plan
     """
     cal = config.calibration
-    effective_fov_axis = fov_axis or cal.fov_axis
     M = np.array(cal.M_ue2dis, dtype=float) if cal.M_ue2dis else default_M()
 
     keyframes = []
@@ -104,17 +103,18 @@ def build_keyframes(track, config: Config, *, fov_axis: str | None = None,
         d = pivot_distance_const if pivot_distance_const is not None else (fr.focus_m if fr.focus_m is not None else 1.0)
         pose = decompose_pivot_orbit(C, R, d, forward_axis=cal.forward_axis,
                                      euler_order=cal.euler_order)
-        fov = map_fov(fr.fov_h_deg, fov_axis=effective_fov_axis, aspect=cal.aspect)
+        zoom = hfov_to_zoom(fr.fov_h_deg, cal.baseline_focal_mm, cal.sensor_width_mm)
         keyframes.append({
             "idx": fr.idx, "t_sec": fr.t_sec,
             "pivot": pose["pivot"], "rotation": pose["rotation"],
-            "distance": pose["distance"], "fov": fov,
+            "distance": pose["distance"], "zoom": zoom,
         })
 
     field_map = cal.field_map or {
-        "pivot.x": "camera_pivot.x", "pivot.y": "camera_pivot.y", "pivot.z": "camera_pivot.z",
-        "rotation.x": "camera_rotation.x", "rotation.y": "camera_rotation.y",
-        "rotation.z": "camera_rotation.z", "distance": "distance", "fov": "fieldOfView",
+        "pivot.x": "camera pivot.x", "pivot.y": "camera pivot.y", "pivot.z": "camera pivot.z",
+        "rotation.x": "camera rotation.x", "rotation.y": "camera rotation.y",
+        "rotation.z": "camera rotation.z", "distance": "distance from pivot",
+        "zoom": "virtual camera zoom",
     }
 
     keys = []
@@ -124,7 +124,7 @@ def build_keyframes(track, config: Config, *, fov_axis: str | None = None,
             "values": {
                 "pivot.x": kf["pivot"][0], "pivot.y": kf["pivot"][1], "pivot.z": kf["pivot"][2],
                 "rotation.x": kf["rotation"][0], "rotation.y": kf["rotation"][1],
-                "rotation.z": kf["rotation"][2], "distance": kf["distance"], "fov": kf["fov"],
+                "rotation.z": kf["rotation"][2], "distance": kf["distance"], "zoom": kf["zoom"],
             },
         })
 
@@ -137,12 +137,12 @@ def build_keyframes(track, config: Config, *, fov_axis: str | None = None,
 
 
 def convert_dry_run(fbx_or_intermediate: str, *, config: Config,
-                    layer_uid: str, fov_axis: str | None = None,
+                    layer_uid: str,
                     pivot_distance_const: float | None = None) -> tuple[str, Any]:
     cal = config.calibration
     track = _load_track(fbx_or_intermediate, euler_order=cal.euler_order,
                         blender_path=getattr(config, "blender_path", None))
-    field_map, keys, keyframes = build_keyframes(track, config, fov_axis=fov_axis,
+    field_map, keys, keyframes = build_keyframes(track, config,
                                                  pivot_distance_const=pivot_distance_const)
 
     inject_payload = {"layer_uid": layer_uid, "start_offset_sec": 0.0,
@@ -153,7 +153,7 @@ def convert_dry_run(fbx_or_intermediate: str, *, config: Config,
         "dry_run_plan": {
             "frame_count": len(track.frames),
             "fps": track.fps,
-            "fov_axis": fov_axis or cal.fov_axis,
+            "fov_control": "zoom_scale",
             "keyframes": keyframes,
             "note": ("field map names and start_offset_sec are placeholders resolved live in "
                      "Plan 2 (P2 field map; --start-tc/--at-playhead); beats are computed "
@@ -164,8 +164,9 @@ def convert_dry_run(fbx_or_intermediate: str, *, config: Config,
     return "convert", data
 
 
-def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid, fov_axis=None,
-                 pivot_distance_const=None, start_offset_sec=0.0, chunk_size=None):
+def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid,
+                 pivot_distance_const=None, start_offset_sec=0.0, chunk_size=None,
+                 verify=False, tol_pos=0.001, tol_rot=0.05, tol_zoom=0.05):
     from vcam_bridge.designer.client import DesignerClient
     from vcam_bridge.designer.inject import inject_keys
     from vcam_bridge.designer.codegen import validate_uid
@@ -177,7 +178,7 @@ def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid, fov_axis=No
             raise ConfigError("%s must be a 0x-hex uid: %s" % (label, exc), details={"value": u}) from exc
     cal = config.calibration
     track = _load_track(fbx, euler_order=cal.euler_order, blender_path=getattr(config, "blender_path", None))
-    field_map, keys, _ = build_keyframes(track, config, fov_axis=fov_axis, pivot_distance_const=pivot_distance_const)
+    field_map, keys, keyframes = build_keyframes(track, config, pivot_distance_const=pivot_distance_const)
     client = DesignerClient(transport, host)
     client.resolve_routing()
     setup = client.execute(_SET_TARGET_SCRIPT % {"layer": layer_uid, "vc": vc_uid}).return_value or {}
@@ -185,5 +186,22 @@ def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid, fov_axis=No
         raise PartialError("failed to set ACC camera target: %s" % setup.get("error", "unknown"), details=setup)
     written = inject_keys(client, layer_uid=layer_uid, fields=field_map, keys=keys,
                           start_offset_sec=start_offset_sec, chunk_size=chunk_size or config.chunk_size)
+    verify_report = None
+    if verify:
+        from vcam_bridge.designer.inject import verify_keys_persistence, verify_world_pose
+        from vcam_bridge.transform.decompose import recompose
+        verify_report = verify_keys_persistence(
+            client, layer_uid=layer_uid, fields=field_map, keys=keys,
+            start_offset_sec=start_offset_sec,
+            tol_pos=tol_pos, tol_rot=tol_rot, tol_zoom=tol_zoom)
+        expected_positions = []
+        for kf in keyframes:
+            C, _ = recompose({"pivot": kf["pivot"], "rotation": kf["rotation"],
+                              "distance": kf["distance"]}, forward_axis=cal.forward_axis)
+            expected_positions.append(C.tolist())
+        world_report = verify_world_pose(
+            client, vc_uid=vc_uid, keys=keys, start_offset_sec=start_offset_sec,
+            expected_positions=expected_positions, tol_pos=tol_pos)
+        verify_report["world_pose"] = world_report
     return "convert", {"written": written, "frames": len(keys), "layer_uid": layer_uid,
-                       "vc_uid": vc_uid, "target_setup": setup}
+                       "vc_uid": vc_uid, "target_setup": setup, "verify": verify_report}

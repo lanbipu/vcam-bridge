@@ -67,3 +67,24 @@ def test_verify_world_pose_raises():
             start_offset_sec=0.0,
             expected_positions=[[1.0, 0.0, -2.0]],
             tol_pos=0.001)
+
+
+def test_verify_world_pose_empty_keys():
+    from vcam_bridge.designer.inject import verify_world_pose
+    ft = FakeTransport(execute_responses=[])
+    c = DesignerClient(ft, "localhost")
+    report = verify_world_pose(c, vc_uid="0xabc", keys=[], start_offset_sec=0.0,
+                               expected_positions=[], tol_pos=0.001)
+    assert report["sampled"] == 0
+
+
+def test_verify_persistence_null_return_raises():
+    from vcam_bridge.designer.inject import verify_keys_persistence
+    from vcam_bridge.domain.errors import PartialError
+    ft = FakeTransport(execute_responses=[_ok("null")])
+    c = DesignerClient(ft, "localhost")
+    with pytest.raises(PartialError, match="returned null"):
+        verify_keys_persistence(c, layer_uid="0x1",
+            fields={"pivot.x": "camera pivot.x"},
+            keys=[{"t_sec": 0, "values": {"pivot.x": 1.0}}],
+            start_offset_sec=0.0, tol_pos=0.001, tol_rot=0.05, tol_zoom=0.05)

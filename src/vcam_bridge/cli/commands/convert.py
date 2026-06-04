@@ -189,16 +189,15 @@ def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid,
     verify_report = None
     if verify:
         from vcam_bridge.designer.inject import verify_keys_persistence, verify_world_pose
-        from vcam_bridge.transform.decompose import disguise_euler_to_matrix, forward_vector
+        from vcam_bridge.transform.decompose import recompose
         verify_report = verify_keys_persistence(
             client, layer_uid=layer_uid, fields=field_map, keys=keys,
             start_offset_sec=start_offset_sec,
             tol_pos=tol_pos, tol_rot=tol_rot, tol_zoom=tol_zoom)
         expected_positions = []
         for kf in keyframes:
-            R = disguise_euler_to_matrix(*kf["rotation"])
-            fwd = forward_vector(cal.forward_axis)
-            C = np.asarray(kf["pivot"]) - kf["distance"] * (R.T @ fwd)
+            C, _ = recompose({"pivot": kf["pivot"], "rotation": kf["rotation"],
+                              "distance": kf["distance"]}, forward_axis=cal.forward_axis)
             expected_positions.append(C.tolist())
         world_report = verify_world_pose(
             client, vc_uid=vc_uid, keys=keys, start_offset_sec=start_offset_sec,

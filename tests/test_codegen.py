@@ -133,3 +133,12 @@ def test_validate_field_name_allows_spaces():
     assert validate_field_name("camera pivot.x") == "camera pivot.x"
     assert validate_field_name("distance from pivot") == "distance from pivot"
     assert validate_field_name("virtual camera zoom") == "virtual camera zoom"
+
+
+def test_validate_field_name_rejects_leading_trailing_spaces():
+    with pytest.raises(ValueError):
+        validate_field_name(" camera pivot.x")
+    with pytest.raises(ValueError):
+        validate_field_name("camera pivot.x ")
+    with pytest.raises(ValueError):
+        validate_field_name(" ")

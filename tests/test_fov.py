@@ -60,3 +60,15 @@ def test_hfov_zoom_roundtrip():
         z = hfov_to_zoom(float(fov), B, S)
         back = zoom_to_hfov(z, B, S)
         assert math.isclose(back, fov, abs_tol=0.01)
+
+
+def test_hfov_to_zoom_rejects_zero():
+    import pytest
+    with pytest.raises(ValueError):
+        hfov_to_zoom(0.0, 30.296, 35.0)
+
+
+def test_hfov_to_zoom_rejects_180():
+    import pytest
+    with pytest.raises(ValueError):
+        hfov_to_zoom(180.0, 30.296, 35.0)

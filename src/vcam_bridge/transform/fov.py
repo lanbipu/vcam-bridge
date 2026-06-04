@@ -22,6 +22,8 @@ def map_fov(h_fov_deg: float, *, fov_axis: str, aspect: float) -> float:
 
 
 def hfov_to_zoom(h_fov_deg: float, baseline_focal_mm: float, sensor_width_mm: float) -> float:
+    if h_fov_deg <= 0.0 or h_fov_deg >= 180.0:
+        raise ValueError("h_fov_deg must be in (0, 180), got %s" % h_fov_deg)
     target_focal = sensor_width_mm / (2 * math.tan(math.radians(h_fov_deg) / 2))
     return target_focal / baseline_focal_mm
 

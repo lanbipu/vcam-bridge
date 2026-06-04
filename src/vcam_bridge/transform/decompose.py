@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import numpy as np
 from scipy.spatial.transform import Rotation
-from vcam_bridge.transform.rotation import euler_to_matrix, matrix_to_euler
 
 _AXES = {"+X": [1, 0, 0], "-X": [-1, 0, 0], "+Y": [0, 1, 0],
          "-Y": [0, -1, 0], "+Z": [0, 0, 1], "-Z": [0, 0, -1]}
@@ -23,7 +22,7 @@ def disguise_matrix_to_euler(R: np.ndarray) -> tuple[float, float, float]:
     return (float(angles[1]), float(-angles[2]), float(angles[0]))
 
 
-def decompose_pivot_orbit(C, R, d, *, forward_axis, euler_order):
+def decompose_pivot_orbit(C, R, d, *, forward_axis, euler_order=None):
     C = np.asarray(C, dtype=float)
     R = np.asarray(R, dtype=float)
     f = R.T @ forward_vector(forward_axis)
@@ -32,7 +31,7 @@ def decompose_pivot_orbit(C, R, d, *, forward_axis, euler_order):
     return {"pivot": tuple(float(x) for x in pivot), "rotation": rot, "distance": float(d)}
 
 
-def recompose(pose, *, forward_axis, euler_order):
+def recompose(pose, *, forward_axis, euler_order=None):
     R = disguise_euler_to_matrix(*pose["rotation"])
     f = R.T @ forward_vector(forward_axis)
     pivot = np.asarray(pose["pivot"], dtype=float)

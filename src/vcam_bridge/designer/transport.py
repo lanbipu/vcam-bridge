@@ -47,6 +47,47 @@ class RequestsTransport:
             raise ExternalError("Designer returned a non-JSON response", details={"host": host, "path": path}) from exc
 
 
+class CurlTransport:
+    """Fallback HTTP transport using curl subprocess.
+    Works around macOS network restrictions on ad-hoc signed Python binaries."""
+
+    def post_execute(self, host, script, module_name=None, timeout_s=None):
+        import json, subprocess
+        body: dict[str, Any] = {"script": script}
+        if module_name:
+            body["moduleName"] = module_name
+        cmd = ["curl", "-s", "-X", "POST", f"http://{host}/api/session/python/execute",
+               "-H", "Content-Type: application/json", "-d", json.dumps(body)]
+        if timeout_s:
+            cmd += ["--connect-timeout", str(int(timeout_s)), "-m", str(int(timeout_s))]
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s or 30)
+            if proc.returncode != 0:
+                raise ExternalError("curl failed (rc=%s): %s" % (proc.returncode, proc.stderr),
+                                    details={"host": host})
+            return json.loads(proc.stdout)
+        except subprocess.TimeoutExpired:
+            raise ExternalError("curl timed out", details={"host": host, "timeout": timeout_s})
+        except (json.JSONDecodeError, OSError) as exc:
+            raise ExternalError("curl transport error: %s" % exc, details={"host": host}) from exc
+
+    def get_json(self, host, path, timeout_s=None):
+        import json, subprocess
+        cmd = ["curl", "-s", f"http://{host}{path}"]
+        if timeout_s:
+            cmd += ["--connect-timeout", str(int(timeout_s)), "-m", str(int(timeout_s))]
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s or 30)
+            if proc.returncode != 0:
+                raise ExternalError("curl failed (rc=%s): %s" % (proc.returncode, proc.stderr),
+                                    details={"host": host, "path": path})
+            return json.loads(proc.stdout)
+        except subprocess.TimeoutExpired:
+            raise ExternalError("curl timed out", details={"host": host, "path": path, "timeout": timeout_s})
+        except (json.JSONDecodeError, OSError) as exc:
+            raise ExternalError("curl transport error: %s" % exc, details={"host": host, "path": path}) from exc
+
+
 class FakeTransport:
     """Test double. execute_responses are returned in order; json_responses keyed by path."""
 

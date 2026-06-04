@@ -43,7 +43,22 @@ def test_ultrawide_v_smaller_than_h():
     assert v < 120.0
 
 
-from vcam_bridge.transform.fov import hfov_to_zoom, zoom_to_hfov
+from vcam_bridge.transform.fov import hfov_to_zoom, zoom_to_hfov, fov_h_from_sensor
+
+
+def test_fov_h_from_sensor_ue_cinecamera():
+    # UE Super35-ish filmback: 24.0mm width, 35mm lens -> ~37.85 deg horizontal FOV
+    assert math.isclose(fov_h_from_sensor(24.0, 35.0), 37.8493, abs_tol=1e-3)
+    # 36mm full-frame, 50mm lens -> ~39.6 deg
+    assert math.isclose(fov_h_from_sensor(36.0, 50.0),
+                        math.degrees(2 * math.atan(36.0 / 100.0)), rel_tol=1e-9)
+
+
+def test_fov_h_from_sensor_rejects_nonpositive():
+    with pytest.raises(ValueError):
+        fov_h_from_sensor(0.0, 35.0)
+    with pytest.raises(ValueError):
+        fov_h_from_sensor(24.0, 0.0)
 
 
 def test_hfov_to_zoom_fixture_values():

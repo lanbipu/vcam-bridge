@@ -31,6 +31,10 @@ else:
             missing.append(fieldmap[key])
         else:
             fs.disableSequencing = False
+            try:
+                fs.setRange(-10000.0, 10000.0, 0.0001)
+            except Exception:
+                pass
             seqs[key] = fs
     if missing:
         result = {"ok": False, "error": "missing fields", "missing": missing}
@@ -38,7 +42,7 @@ else:
         start_offset = payload["start_offset_sec"]
         written = 0
         for kf in payload["keys"]:
-            beat = track.timeToBeat(start_offset + kf["t_sec"])
+            beat = target.tStart + track.timeToBeat(start_offset + kf["t_sec"])
             vals = kf["values"]
             for key in vals:
                 seqs[key].sequence.setFloat(beat, vals[key])

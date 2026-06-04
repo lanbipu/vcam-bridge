@@ -27,7 +27,7 @@ def test_pipeline_identity_camera_at_origin(tmp_path):
     kf = data["dry_run_plan"]["keyframes"][0]
     expected_zoom = hfov_to_zoom(90.0, 30.296, 35.0)
     assert abs(kf["zoom"] - expected_zoom) < 0.001
-    assert kf["distance"] == 2.0
+    assert kf["distance"] == 0.0   # default: pivot == camera position
     assert len(kf["pivot"]) == 3
     assert len(kf["rotation"]) == 3
 
@@ -38,7 +38,8 @@ def test_pipeline_identity_camera_at_origin(tmp_path):
 
 
 def test_pipeline_known_translation(tmp_path):
-    """Camera at (100, 0, 0) UE-cm → should be (1, 0, 0) stage-m with default_M."""
+    """Blender-extracted translation (100, 0, 0) cm → Disguise (0, 0, 1) m via
+    dis = (-T_y, T_z, T_x)/100. With default distance 0, pivot == that position."""
     p = tmp_path / "t.json"
     p.write_text(json.dumps({"fps": 30, "camera": "Cam", "frames": [
         {"idx": 0, "t_sec": 0.0, "position": [100, 0, 0], "rotation_deg": [0, 0, 0],
@@ -46,21 +47,9 @@ def test_pipeline_known_translation(tmp_path):
     ]}))
     _, data = convert_dry_run(str(p), config=load_config(None), layer_uid="0x1")
     kf = data["dry_run_plan"]["keyframes"][0]
-    pivot = np.array(kf["pivot"])
-    M = default_M()
-    C_expected = apply_M(M, np.array([[100, 0, 0]]))[0]
-    f_local = np.array([0, 0, 1])
-    Rm = M[:3, :3]
-    scale = abs(np.linalg.det(Rm)) ** (1.0 / 3.0)
-    R_only = Rm / scale
-    U, _, Vt = np.linalg.svd(R_only)
-    R_lin = U @ Vt
-    if np.linalg.det(R_lin) < 0:
-        U[:, -1] = -U[:, -1]
-        R_lin = U @ Vt
-    R_cam = R_lin @ np.eye(3)
-    expected_pivot = C_expected + 1.0 * (R_cam.T @ f_local)
-    assert np.allclose(pivot, expected_pivot, atol=1e-6)
+    assert np.allclose(kf["pivot"], apply_M(default_M(), np.array([[100, 0, 0]]))[0], atol=1e-9)
+    assert np.allclose(kf["pivot"], [0, 0, 1], atol=1e-9)
+    assert kf["distance"] == 0.0
 
 
 def test_pipeline_multi_frame_monotonic_time(tmp_path):

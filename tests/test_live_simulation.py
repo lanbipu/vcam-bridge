@@ -45,18 +45,19 @@ def test_convert_live_full_flow(tmp_path):
     ft = FakeTransport(
         json_responses=_solo(),
         execute_responses=[
+            _ok('{"aspect": 1.7777777778}'),  # read render aspect
             _ok('{"ok": true, "note": ["camera-target-set"]}'),  # set target
-            _ok('{"ok": true, "written": 40}'),  # chunk 1
-            _ok('{"ok": true, "written": 40}'),  # chunk 2
+            _ok('{"ok": true, "written": 45}'),  # chunk 1
+            _ok('{"ok": true, "written": 45}'),  # chunk 2
         ],
     )
     op, data = convert_live(ft, host="localhost", fbx=str(p), config=load_config(None),
                             layer_uid="0xabc", vc_uid="0xdef", chunk_size=5)
     assert op == "convert"
-    assert data["written"] == 80
+    assert data["written"] == 90
     assert data["frames"] == 10
     assert data["target_setup"]["ok"] is True
-    assert len(ft.executed) == 3  # set-target + 2 chunks
+    assert len(ft.executed) == 4  # read-aspect + set-target + 2 chunks
 
 
 # ---------- 3.8 timeout bisect-retry → full write ----------
@@ -109,14 +110,15 @@ def test_convert_live_director_routing(tmp_path):
         json_responses={"/api/session/status/session":
                         {"isRunningSolo": False, "director": {"hostname": "10.0.0.1"}}},
         execute_responses=[
+            _ok('{"aspect": 1.7777777778}'),  # read render aspect
             _ok('{"ok": true, "note": []}'),
-            _ok('{"ok": true, "written": 16}'),
+            _ok('{"ok": true, "written": 18}'),
         ],
     )
     op, data = convert_live(ft, host="localhost:80", fbx=str(p), config=load_config(None),
                             layer_uid="0xabc", vc_uid="0xdef", chunk_size=100)
-    assert data["written"] == 16
-    assert ft.executed[0]["host"] == "10.0.0.1:80"
+    assert data["written"] == 18
+    assert ft.executed[0]["host"] == "10.0.0.1:80"   # aspect read already routed to director
 
 
 # ---------- 3.5 build_keyframes consistency ----------

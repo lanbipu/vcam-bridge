@@ -27,10 +27,12 @@ class DesignerClient:
         self._t = transport
         self.host = host
         self._timeout_s = timeout_s
+        self.is_solo = True   # set by resolve_routing; world-pose verify is unreliable in solo
 
     def resolve_routing(self) -> None:
         st = self._t.get_json(self.host, "/api/session/status/session", self._timeout_s)
-        if not st.get("isRunningSolo", True):
+        self.is_solo = bool(st.get("isRunningSolo", True))
+        if not self.is_solo:
             hostname = st["director"]["hostname"]
             if ":" not in hostname and ":" in self.host:
                 hostname = "%s:%s" % (hostname, self.host.rsplit(":", 1)[1])
@@ -50,6 +52,12 @@ class DesignerClient:
         if code == 0:
             rv = resp.get("returnValue", "null")
             value = None if rv in (None, "null", "") else json.loads(rv)
+            # Designer double-encodes json.dumps() returns: unwrap one more layer
+            if isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except (json.JSONDecodeError, ValueError):
+                    pass
             return ExecuteResult(value, resp.get("d3Log", ""), resp.get("pythonLog", ""))
         msg = self._fix_line_offset(status.get("message", "") or "")
         details = {"code": code, "details": status.get("details", []),

@@ -56,11 +56,24 @@ def main():
     for f in range(f0, f1 + 1):
         scene.frame_set(f)
         mw = cam.matrix_world
-        T = [[mw[r][c] for c in range(4)] for r in range(4)]
-        fov_h = math.degrees(cam.data.angle_x)
+        # Blender FBX import bakes the unit conversion (cm→m = 0.01 scale) into
+        # matrix_world.  Decompose to get clean rotation + position in original
+        # FBX units (cm) so downstream default_M handles cm→m correctly.
+        loc, rot, scl = mw.decompose()
+        s = scl[0]  # uniform scale from FBX unit conversion
+        rm = rot.to_matrix()
+        T = [[rm[r][c] for c in range(3)] + [loc[r] / s] for r in range(3)]
+        T.append([0.0, 0.0, 0.0, 1.0])
+        # UE-convention horizontal FOV from filmback width + focal (robust to Blender
+        # sensor_fit, unlike cam.data.angle_x). Sensor/focal are the UE-exported lens
+        # data the user asked to drive FOV from.
+        sw = cam.data.sensor_width      # mm == UE Filmback Sensor Width
+        focal = cam.data.lens           # mm == UE Current Focal Length
+        fov_h = math.degrees(2 * math.atan(sw / (2 * focal)))
         focus = cam.data.dof.focus_distance if cam.data.dof else None
         frames.append({"idx": f - f0, "t_sec": (f - f0) / fps, "T": T,
-                       "fov_h_deg": fov_h, "focus_m": focus})
+                       "fov_h_deg": fov_h, "focus_m": focus,
+                       "sensor_width_mm": sw, "focal_mm": focal})
     out = {"schema": "vcam.track/1", "fps": fps, "camera": cam.name, "frames": frames}
     with open(args.out, "w") as fh:
         json.dump(out, fh)

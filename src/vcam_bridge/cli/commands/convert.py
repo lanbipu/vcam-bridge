@@ -7,10 +7,13 @@ from vcam_bridge.domain.errors import ConfigError
 from vcam_bridge.domain.models import Config
 from vcam_bridge.transform.register import default_M, apply_M
 from vcam_bridge.transform.decompose import decompose_pivot_orbit
-from vcam_bridge.transform.fov import hfov_to_zoom
+from vcam_bridge.transform.fov import hfov_to_zoom, h_to_v
 from vcam_bridge.designer.codegen import build_inject_script
 
-_CANONICAL_FIELDS = ("pivot.x", "pivot.y", "pivot.z", "rotation.x", "rotation.y", "rotation.z", "distance", "zoom")
+# "view_angle" drives a regular Live Camera's FOV (= vertical FOV); "zoom" drives a
+# VirtualCamera. Both are injected so either camera type renders the right FOV.
+_CANONICAL_FIELDS = ("pivot.x", "pivot.y", "pivot.z", "rotation.x", "rotation.y", "rotation.z",
+                     "distance", "view_angle", "zoom")
 
 _SET_TARGET_SCRIPT = '''
 import json
@@ -34,7 +37,7 @@ note = []
 if vc is None:
     note.append("vc-not-found-by-uid")
 try:
-    cam_seq = layer.findSequence("Camera")
+    cam_seq = layer.findSequence("camera")
     if cam_seq is not None and vc is not None:
         cam_seq.disableSequencing = True
         cam_seq.sequence.setResource(layer.tStart, vc)
@@ -44,34 +47,69 @@ try:
 except Exception as e:
     note.append("camera-target-skipped:" + str(e))
 try:
-    cs = layer.findSequence("coordinate system")
+    cs = layer.findSequence("virtual camera coordinates")
     if cs is not None:
+        cs.sequence.stripToFirstKey()
         cs.disableSequencing = True
-        cs.sequence.setFloat(layer.tStart, 0)
-        note.append("coord-global-attempted")
+        cs.sequence.setFloat(layer.tStart, 0.0)
+        note.append("coord-global-set")
 except Exception as e:
     note.append("coord-skipped:" + str(e))
 return json.dumps({"ok": True, "vc_found": vc is not None, "note": note})
 '''
 
 
+_READ_ASPECT_SCRIPT = '''
+import json
+vc = None
+for cam in state.stage.cameras:
+    if cam.uid == int(%(vc)r, 16):
+        vc = cam
+        break
+if vc is None:
+    return json.dumps({"aspect": None})
+return json.dumps({"aspect": float(vc.aspectRatio)})
+'''
+
+
+def _read_camera_aspect(client, vc_uid: str) -> float | None:
+    """Read the target camera's actual render aspect (output resolution w/h) live, so the
+    'view angle' (vertical FOV) -> horizontal FOV conversion is exact regardless of the
+    camera's output resolution. Falls back to None (-> config aspect) on any failure."""
+    try:
+        res = client.execute(_READ_ASPECT_SCRIPT % {"vc": vc_uid}).return_value or {}
+        a = res.get("aspect")
+        return float(a) if a and float(a) > 0.0 else None
+    except Exception:
+        return None
+
+
+def _unit(v: np.ndarray) -> np.ndarray:
+    return v / np.linalg.norm(v)
+
+
 def _stage_pose_for_frame(T_ue: np.ndarray, M: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Apply M_ue2dis to the camera position and rotation. Returns (C_stage, R_stage).
-    Extracts the nearest PROPER rotation via SVD so a reflection/handedness component
-    in M never silently mirrors the orientation."""
+    """Map one Blender-extracted world matrix to a Disguise stage pose (C, R).
+
+    Position: apply M (cm->m + axis map + undo Blender's Y-flip).
+    Rotation: build the Disguise world rotation matrix from the camera's world look/up
+    directions mapped through M's axis map P (= the linear block with the uniform scale
+    divided out; P may be a REFLECTION -- correct, it undoes Blender's Y-flip). The
+    Blender camera looks along its local -Z with up = local +Y. Disguise stores the
+    world matrix so that camera look = R^T @ [0,0,1], i.e. look/up/right are its ROWS;
+    verified against UE FRotator ground truth that disguise_matrix_to_euler then equals
+    UE (Pitch, Yaw, Roll). See docs/ue-disguise-axis-mapping.md."""
     C_ue = T_ue[:3, 3]
     C_stage = apply_M(M, C_ue.reshape(1, 3))[0]
     Rm = M[:3, :3]
-    det = np.linalg.det(Rm)
-    scale = abs(det) ** (1.0 / 3.0)
-    A = Rm / scale
-    U, _, Vt = np.linalg.svd(A)
-    R_lin = U @ Vt
-    if np.linalg.det(R_lin) < 0:
-        U[:, -1] = -U[:, -1]
-        R_lin = U @ Vt
-    R_stage = R_lin @ T_ue[:3, :3]
-    return C_stage, R_stage
+    scale = abs(np.linalg.det(Rm)) ** (1.0 / 3.0)
+    P = Rm / scale
+    R_cam = T_ue[:3, :3]
+    look = _unit(P @ (-R_cam[:, 2]))
+    up = _unit(P @ R_cam[:, 1])
+    right = _unit(np.cross(up, look))
+    up = _unit(np.cross(look, right))
+    return C_stage, np.array([right, up, look])
 
 
 def _load_track(path: str, *, euler_order: str, blender_path: str | None = None):
@@ -84,7 +122,8 @@ def _load_track(path: str, *, euler_order: str, blender_path: str | None = None)
 
 
 def build_keyframes(track, config: Config, *,
-                    pivot_distance_const: float | None = None) -> tuple[dict, list, list]:
+                    pivot_distance_const: float | str | None = None,
+                    aspect_override: float | None = None) -> tuple[dict, list, list]:
     """Extract keyframe data from a track + config.
 
     Returns:
@@ -95,26 +134,33 @@ def build_keyframes(track, config: Config, *,
     """
     cal = config.calibration
     M = np.array(cal.M_ue2dis, dtype=float) if cal.M_ue2dis else default_M()
+    aspect = aspect_override if aspect_override else cal.aspect   # live render aspect when known
 
     keyframes = []
     for fr in track.frames:
         T_ue = np.array(fr.T, dtype=float)
         C, R = _stage_pose_for_frame(T_ue, M)
-        d = pivot_distance_const if pivot_distance_const is not None else (fr.focus_m if fr.focus_m is not None else 1.0)
+        if pivot_distance_const == "focus":
+            d = fr.focus_m if fr.focus_m is not None else 0.0
+        elif pivot_distance_const is not None:
+            d = float(pivot_distance_const)
+        else:
+            d = 0.0   # default: pivot == camera world position (clean offset)
         pose = decompose_pivot_orbit(C, R, d, forward_axis=cal.forward_axis,
                                      euler_order=cal.euler_order)
         zoom = hfov_to_zoom(fr.fov_h_deg, cal.baseline_focal_mm, cal.sensor_width_mm)
+        view_angle = h_to_v(fr.fov_h_deg, aspect)   # vertical FOV: drives a Live Camera
         keyframes.append({
             "idx": fr.idx, "t_sec": fr.t_sec,
             "pivot": pose["pivot"], "rotation": pose["rotation"],
-            "distance": pose["distance"], "zoom": zoom,
+            "distance": pose["distance"], "view_angle": view_angle, "zoom": zoom,
         })
 
     field_map = cal.field_map or {
         "pivot.x": "camera pivot.x", "pivot.y": "camera pivot.y", "pivot.z": "camera pivot.z",
         "rotation.x": "camera rotation.x", "rotation.y": "camera rotation.y",
         "rotation.z": "camera rotation.z", "distance": "distance from pivot",
-        "zoom": "virtual camera zoom",
+        "view_angle": "view angle", "zoom": "virtual camera zoom",
     }
 
     keys = []
@@ -124,7 +170,8 @@ def build_keyframes(track, config: Config, *,
             "values": {
                 "pivot.x": kf["pivot"][0], "pivot.y": kf["pivot"][1], "pivot.z": kf["pivot"][2],
                 "rotation.x": kf["rotation"][0], "rotation.y": kf["rotation"][1],
-                "rotation.z": kf["rotation"][2], "distance": kf["distance"], "zoom": kf["zoom"],
+                "rotation.z": kf["rotation"][2], "distance": kf["distance"],
+                "view_angle": kf["view_angle"], "zoom": kf["zoom"],
             },
         })
 
@@ -178,14 +225,22 @@ def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid,
             raise ConfigError("%s must be a 0x-hex uid: %s" % (label, exc), details={"value": u}) from exc
     cal = config.calibration
     track = _load_track(fbx, euler_order=cal.euler_order, blender_path=getattr(config, "blender_path", None))
-    field_map, keys, keyframes = build_keyframes(track, config, pivot_distance_const=pivot_distance_const)
     client = DesignerClient(transport, host)
     client.resolve_routing()
+    render_aspect = _read_camera_aspect(client, vc_uid)   # exact view-angle conversion
+    field_map, keys, keyframes = build_keyframes(track, config, pivot_distance_const=pivot_distance_const,
+                                                 aspect_override=render_aspect)
     setup = client.execute(_SET_TARGET_SCRIPT % {"layer": layer_uid, "vc": vc_uid}).return_value or {}
     if not setup.get("ok"):
         raise PartialError("failed to set ACC camera target: %s" % setup.get("error", "unknown"), details=setup)
+    if not setup.get("vc_found", True):   # 错/失效 --vc-uid：脚本 ok:True 但没绑相机，别静默成功
+        raise PartialError("--vc-uid %s not found among stage cameras; ACC layer has no camera bound" % vc_uid,
+                           details=setup)
     written = inject_keys(client, layer_uid=layer_uid, fields=field_map, keys=keys,
                           start_offset_sec=start_offset_sec, chunk_size=chunk_size or config.chunk_size)
+    # FOV is driven by the injected "view angle" (Live Camera) / "virtual camera zoom" (VC)
+    # keyframes -- no separate lens edit needed. The camera focal-mm derives from the FOV.
+    f0 = track.frames[0]
     verify_report = None
     if verify:
         from vcam_bridge.designer.inject import verify_keys_persistence, verify_world_pose
@@ -194,14 +249,26 @@ def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid,
             client, layer_uid=layer_uid, fields=field_map, keys=keys,
             start_offset_sec=start_offset_sec,
             tol_pos=tol_pos, tol_rot=tol_rot, tol_zoom=tol_zoom)
-        expected_positions = []
-        for kf in keyframes:
-            C, _ = recompose({"pivot": kf["pivot"], "rotation": kf["rotation"],
-                              "distance": kf["distance"]}, forward_axis=cal.forward_axis)
-            expected_positions.append(C.tolist())
-        world_report = verify_world_pose(
-            client, vc_uid=vc_uid, keys=keys, start_offset_sec=start_offset_sec,
-            expected_positions=expected_positions, tol_pos=tol_pos)
-        verify_report["world_pose"] = world_report
+        # World-pose verify needs the playhead to advance AND a render to refresh the
+        # camera transform. In solo (no active render node) gototime does not re-render,
+        # so the readback is stale and the check is meaningless -- skip it and tell the
+        # user to confirm visually. Only run it when a director session is rendering.
+        if client.is_solo:
+            verify_report["world_pose"] = {
+                "ok": None, "skipped": "solo",
+                "note": "world-pose check skipped: solo session does not re-render on "
+                        "gototime, so the readback would be stale. Confirm the camera "
+                        "pose visually in the Designer GUI."}
+        else:
+            expected_positions = []
+            for kf in keyframes:
+                C, _ = recompose({"pivot": kf["pivot"], "rotation": kf["rotation"],
+                                  "distance": kf["distance"]}, forward_axis=cal.forward_axis)
+                expected_positions.append(C.tolist())
+            verify_report["world_pose"] = verify_world_pose(
+                client, layer_uid=layer_uid, vc_uid=vc_uid, keys=keys, start_offset_sec=start_offset_sec,
+                expected_positions=expected_positions, tol_pos=tol_pos)
     return "convert", {"written": written, "frames": len(keys), "layer_uid": layer_uid,
-                       "vc_uid": vc_uid, "target_setup": setup, "verify": verify_report}
+                       "vc_uid": vc_uid, "target_setup": setup, "verify": verify_report,
+                       "fov_deg": f0.fov_h_deg, "render_aspect": render_aspect,
+                       "sensor_width_mm": f0.sensor_width_mm, "focal_mm": f0.focal_mm}

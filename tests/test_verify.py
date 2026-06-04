@@ -40,29 +40,33 @@ def test_verify_world_pose_passes():
     from vcam_bridge.designer.inject import verify_world_pose
     ft = FakeTransport(
         execute_responses=[
+            _ok('{"goto_secs": [0.0]}'),          # beat-corrected gototime seconds
             _ok('{"pos": [1.0, 0.0, -2.0]}'),
         ],
     )
     c = DesignerClient(ft, "localhost")
-    report = verify_world_pose(c, vc_uid="0xabc",
+    report = verify_world_pose(c, layer_uid="0xL", vc_uid="0xabc",
         keys=[{"t_sec": 0.0, "values": {"pivot.x": 1.0}}],
         start_offset_sec=0.0,
         expected_positions=[[1.0, 0.0, -2.0]],
         tol_pos=0.001)
     assert report["ok"] is True
     assert report["sampled"] == 1
+    # gototime 用 beatToTime(tStart + timeToBeat(...)) 修正，不再是裸秒（修 tStart 漏算 bug）
+    assert "beatToTime" in ft.executed[0]["script"] and "tStart" in ft.executed[0]["script"]
 
 
 def test_verify_world_pose_raises():
     from vcam_bridge.designer.inject import verify_world_pose
     ft = FakeTransport(
         execute_responses=[
+            _ok('{"goto_secs": [0.0]}'),
             _ok('{"pos": [5.0, 5.0, 5.0]}'),
         ],
     )
     c = DesignerClient(ft, "localhost")
     with pytest.raises(VerifyToleranceError):
-        verify_world_pose(c, vc_uid="0xabc",
+        verify_world_pose(c, layer_uid="0xL", vc_uid="0xabc",
             keys=[{"t_sec": 0.0, "values": {"pivot.x": 1.0}}],
             start_offset_sec=0.0,
             expected_positions=[[1.0, 0.0, -2.0]],
@@ -73,7 +77,7 @@ def test_verify_world_pose_empty_keys():
     from vcam_bridge.designer.inject import verify_world_pose
     ft = FakeTransport(execute_responses=[])
     c = DesignerClient(ft, "localhost")
-    report = verify_world_pose(c, vc_uid="0xabc", keys=[], start_offset_sec=0.0,
+    report = verify_world_pose(c, layer_uid="0xL", vc_uid="0xabc", keys=[], start_offset_sec=0.0,
                                expected_positions=[], tol_pos=0.001)
     assert report["sampled"] == 0
 

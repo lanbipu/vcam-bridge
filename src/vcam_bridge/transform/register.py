@@ -31,16 +31,19 @@ def umeyama(src: np.ndarray, dst: np.ndarray) -> np.ndarray:
 
 
 def default_M() -> np.ndarray:
-    """Fallback UE(Z-up, cm) -> Disguise(Y-up, m) base transform.
-    A PROPER rotation (det=+1): +90deg about X maps Z-up -> Y-up. This does NOT
-    resolve UE's left-handed -> right-handed handedness (that is determined empirically
-    by P5/P6 Umeyama calibration); it is only a non-mirrored starting point for the
-    offline dry-run preview, replaced by config.calibration.M_ue2dis after calibration."""
+    """Blender-extracted UE world (cm) -> Disguise stage (m). Verified against UE
+    Sequencer ground truth: a UE camera Location maps to Disguise as
+    (UE_Y, UE_Z, UE_X)/100 (right->right, up->up, forward->forward; no sign flip).
+    Because the Blender FBX importer negates UE's Y (left- -> right-handed), from the
+    Blender-extracted translation T this is (-T_y, T_z, T_x)/100 -- a reflection
+    (det<0). That reflection is INTENTIONAL: it undoes Blender's Y-flip. The rotation
+    path (convert._stage_pose_for_frame) derives its axis map P from this same linear
+    block, so a calibrated config.calibration.M_ue2dis stays consistent across both."""
     scale = 0.01  # cm -> m
-    # +90deg about X: (x, y, z)_ue -> (x, z, -y)_dis  (det = +1)
-    A = np.array([[1, 0, 0],
-                  [0, 0, 1],
-                  [0, -1, 0]], dtype=float)
+    # (T_x, T_y, T_z)_blender -> (-T_y, T_z, T_x)_dis
+    A = np.array([[0, -1, 0],
+                  [0,  0, 1],
+                  [1,  0, 0]], dtype=float)
     M = np.eye(4)
     M[:3, :3] = scale * A
     return M

@@ -7,9 +7,11 @@ from pydantic import BaseModel, Field, field_validator
 class Frame(BaseModel):
     idx: int
     t_sec: float
-    T: list[list[float]]            # 4x4 world transform (UE world space as ingested)
-    fov_h_deg: float
+    T: list[list[float]]            # 4x4 world transform (Blender-extracted UE world)
+    fov_h_deg: float               # horizontal FOV, = 2*atan(sensor_width/(2*focal))
     focus_m: float | None = None
+    sensor_width_mm: float | None = None   # UE filmback width (lens data from FBX)
+    focal_mm: float | None = None          # UE current focal length
 
     @field_validator("T")
     @classmethod

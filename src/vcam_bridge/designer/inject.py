@@ -49,7 +49,7 @@ def inject_keys(client: DesignerClient, *, layer_uid: str, fields: dict, keys: l
 _TOL_GROUPS = {
     "pivot.x": "pos", "pivot.y": "pos", "pivot.z": "pos",
     "rotation.x": "rot", "rotation.y": "rot", "rotation.z": "rot",
-    "distance": "pos", "zoom": "zoom",
+    "distance": "pos", "view_angle": "rot", "zoom": "zoom",
 }
 
 _VERIFY_BODY = '''
@@ -73,7 +73,7 @@ else:
     start_offset = payload["start_offset_sec"]
     total = 0
     for kf in payload["keys"]:
-        beat = track.timeToBeat(start_offset + kf["t_sec"])
+        beat = target.tStart + track.timeToBeat(start_offset + kf["t_sec"])
         vals = kf["values"]
         for key in vals:
             if key in seqs:
@@ -124,7 +124,7 @@ def _gototime(host: str, t_sec: float) -> None:
         pass
 
 
-def verify_world_pose(client: DesignerClient, *, vc_uid: str, keys: list[dict],
+def verify_world_pose(client: DesignerClient, *, layer_uid: str, vc_uid: str, keys: list[dict],
                       start_offset_sec: float, expected_positions: list,
                       tol_pos: float) -> dict:
     if not keys or not expected_positions:
@@ -134,13 +134,28 @@ def verify_world_pose(client: DesignerClient, *, vc_uid: str, keys: list[dict],
         indices.append(len(keys) // 2)
     if len(keys) > 1:
         indices.append(len(keys) - 1)
+    indices = [i for i in indices if i < len(expected_positions)]
+    # keys 注入在 beat = tStart + timeToBeat(start_offset + t_sec)（与 codegen/inject 一致）。gototime
+    # 收的是秒，须把该 beat 转回时间 beatToTime(tStart + timeToBeat(...))，否则播头漏掉 tStart 偏移
+    # （非 solo + tStart!=0 时对正确注入误报）。tStart/timeToBeat/beatToTime 全在 Disguise 端算（变速安全）。
+    _t_secs = [start_offset_sec + keys[i]["t_sec"] for i in indices]
+    _goto_payload = {"layer_uid": layer_uid, "t_secs": _t_secs}
+    _goto_script = (
+        "import json\npayload = json.loads(" + repr(_json.dumps(_goto_payload)) + ")\n"
+        "local_state = state.localOrDirectorState()\ntrack = local_state.track\ntarget = None\n"
+        "for layer in track.layers:\n"
+        "    if layer.uid == int(payload['layer_uid'], 16):\n        target = layer\n        break\n"
+        "if target is None:\n    return json.dumps({'error': 'layer not found'})\n"
+        "out = [track.beatToTime(target.tStart + track.timeToBeat(t)) for t in payload['t_secs']]\n"
+        "return json.dumps({'goto_secs': out})")
+    _gres = client.execute(_goto_script).return_value or {}
+    if "error" in _gres:
+        raise PartialError("verify world pose: %s" % _gres["error"], details={"layer_uid": layer_uid})
+    _goto_secs = _gres.get("goto_secs", _t_secs)
     max_err = 0.0
     sampled = 0
-    for idx in indices:
-        if idx >= len(expected_positions):
-            continue
-        t_sec = start_offset_sec + keys[idx]["t_sec"]
-        _gototime(client.host, t_sec)
+    for _n, idx in enumerate(indices):
+        _gototime(client.host, _goto_secs[_n])
         payload = {"vc_uid": vc_uid}
         script = ("import json\npayload = json.loads(" + repr(_json.dumps(payload)) + ")\n"
                   "vc = None\nfor c in state.stage.cameras:\n"

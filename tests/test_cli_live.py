@@ -12,7 +12,7 @@ def _ok(rv):
 
 def test_targets_list_command_returns_layers():
     ft = FakeTransport(
-        execute_responses=[_ok('[["My ACC", "0xabc"]]')],
+        execute_responses=[_ok('[["My ACC", "0xabc", "<_blipValue(AnimateCamera) instance at 0x1>"]]')],
         json_responses={"/api/session/status/session": {"isRunningSolo": True}},
     )
     op, data = targets_cmd.list_targets(ft, host="localhost")
@@ -25,15 +25,51 @@ def test_convert_live_injects(sample_track_csv):
     from vcam_bridge.cli.commands.convert import convert_live
     ft = FakeTransport(
         json_responses={"/api/session/status/session": {"isRunningSolo": True}},
-        execute_responses=[_ok('{"ok": true, "note": []}'),         # set-target
-                           _ok('{"ok": true, "written": 16}')],     # one chunk (2 frames x 8 fields)
+        execute_responses=[_ok('{"aspect": 1.7777777778}'),         # read render aspect
+                           _ok('{"ok": true, "note": []}'),         # set-target
+                           _ok('{"ok": true, "written": 18}')],     # one chunk (2 frames x 9 fields)
     )
     op, data = convert_live(ft, host="localhost", fbx=str(sample_track_csv),
                             config=load_config(None), layer_uid="0xabc", vc_uid="0xdef", chunk_size=100)
     assert op == "convert"
-    assert data["written"] == 16
+    assert data["written"] == 18
     assert data["vc_uid"] == "0xdef"
-    assert len(ft.executed) == 2   # 1 set-target + 1 chunk
+    assert len(ft.executed) == 3   # read-aspect + set-target + 1 chunk
+
+
+def test_convert_live_rejects_unmatched_vc_uid(sample_track_csv):
+    # set-target 脚本 ok:True 但 vc_found:False（--vc-uid 不存在）→ PartialError，不静默成功
+    from vcam_bridge.config import load_config
+    from vcam_bridge.cli.commands.convert import convert_live
+    from vcam_bridge.domain.errors import PartialError
+    ft = FakeTransport(
+        json_responses={"/api/session/status/session": {"isRunningSolo": True}},
+        execute_responses=[_ok('{"aspect": 1.7777777778}'),
+                           _ok('{"ok": true, "vc_found": false, "note": ["vc-not-found-by-uid"]}')],
+    )
+    with pytest.raises(PartialError):
+        convert_live(ft, host="localhost", fbx=str(sample_track_csv),
+                     config=load_config(None), layer_uid="0xabc", vc_uid="0xdeadbeef")
+
+
+def test_convert_live_verify_skips_world_pose_in_solo(sample_track_csv):
+    """In a solo session, --verify keeps the (reliable) field-value check but SKIPS the
+    world-pose check (gototime doesn't re-render in solo -> readback is stale)."""
+    from vcam_bridge.config import load_config
+    from vcam_bridge.cli.commands.convert import convert_live
+    ft = FakeTransport(
+        json_responses={"/api/session/status/session": {"isRunningSolo": True}},
+        execute_responses=[_ok('{"aspect": 1.7777777778}'),            # read aspect
+                           _ok('{"ok": true, "note": []}'),            # set-target
+                           _ok('{"ok": true, "written": 18}'),         # inject chunk
+                           _ok('{"max_errors": {}, "total_keys": 18}')],  # verify field values
+    )
+    op, data = convert_live(ft, host="localhost", fbx=str(sample_track_csv),
+                            config=load_config(None), layer_uid="0xabc", vc_uid="0xdef",
+                            chunk_size=100, verify=True)
+    assert data["verify"]["ok"] is True                       # field-value check ran
+    assert data["verify"]["world_pose"]["skipped"] == "solo"  # world-pose skipped
+    assert len(ft.executed) == 4   # aspect + set-target + chunk + verify-keys (no gototime/read)
 
 
 def test_convert_live_invalid_uid():
@@ -52,7 +88,8 @@ def test_convert_live_set_target_fail(sample_track_csv):
     from vcam_bridge.domain.errors import PartialError
     ft = FakeTransport(
         json_responses={"/api/session/status/session": {"isRunningSolo": True}},
-        execute_responses=[_ok('{"ok": false, "error": "acc layer not found"}')],
+        execute_responses=[_ok('{"aspect": 1.7777777778}'),         # read render aspect
+                           _ok('{"ok": false, "error": "acc layer not found"}')],
     )
     with pytest.raises(PartialError, match="camera target"):
         convert_live(ft, host="localhost", fbx=str(sample_track_csv),

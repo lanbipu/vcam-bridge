@@ -67,15 +67,55 @@ def test_main_convert_missing_fbx_error_envelope(tmp_path, capsys):
     assert env["error"]["exit_code"] == 13
 
 
-def test_stage_pose_default_transform_not_mirrored():
+# Real Blender-extracted matrices from a UE 5.7.4 CineCamera (Sequencer FBX export,
+# Force Front XAxis OFF, Bake Transforms). Ground truth read from UE Sequencer:
+#   frame 0   : Location (-1000, -150, 350) cm, FRotator(Pitch=0,    Yaw=0,   Roll=0)
+#   frame end : Location (-2500,  1250, 520) cm, FRotator(Pitch=-4.8, Yaw=-26, Roll=5)
+_FIX_T0 = [[-0.0, 0.0, -1.0, -1000.000022352], [-1.0, -0.0, 0.0, 150.000003353],
+           [0.0, 1.0, -0.0, 350.000007823], [0, 0, 0, 1]]
+_FIX_T1 = [[0.430148214, 0.113129623, -0.895641685, -2500.00028871],
+           [-0.898570776, -0.041792274, -0.43683365, -1250.000144355],
+           [-0.086849891, 0.992700756, 0.083678216, 520.000040978], [0, 0, 0, 1]]
+
+
+def test_fbx_frame_matches_ue_sequencer_ground_truth():
+    """End-to-end: Blender-extracted UE camera matrices -> Disguise ACC pivot/rotation
+    must equal the UE Sequencer values. pivot = (UE_Y, UE_Z, UE_X)/100 and
+    rotation = (Pitch, Yaw, Roll) (distance 0 -> pivot is the exact camera position).
+    See docs/ue-disguise-axis-mapping.md."""
     import numpy as np
-    from vcam_bridge.cli.commands.convert import _stage_pose_for_frame
-    from vcam_bridge.transform.register import default_M
-    T = np.eye(4)
-    T[:3, 3] = [100.0, 0.0, 0.0]   # UE camera at +100cm X
-    C, R = _stage_pose_for_frame(T, default_M())
-    assert C[0] > 0                                   # +X stays +X (not mirrored)
-    assert np.isclose(np.linalg.det(R), 1.0, atol=1e-9)   # proper rotation
+    from vcam_bridge.domain.models import CameraTrack
+    from vcam_bridge.cli.commands.convert import build_keyframes
+    from vcam_bridge.config import load_config
+    track = CameraTrack(fps=30.0, camera="Cam", frames=[
+        {"idx": 0, "t_sec": 0.0, "T": _FIX_T0, "fov_h_deg": 37.8493},
+        {"idx": 1, "t_sec": 5.0, "T": _FIX_T1, "fov_h_deg": 37.8493}])
+    _, _, kfs = build_keyframes(track, load_config(None))
+    assert np.allclose(kfs[0]["pivot"], [-1.5, 3.5, -10.0], atol=1e-4)
+    assert np.allclose(kfs[0]["rotation"], [0.0, 0.0, 0.0], atol=2e-3)
+    assert kfs[0]["distance"] == 0.0
+    assert np.allclose(kfs[1]["pivot"], [12.5, 5.2, -25.0], atol=1e-4)
+    assert np.allclose(kfs[1]["rotation"], [-4.8, -26.0, 5.0], atol=2e-3)
+    # FOV -> ACC "view angle" (vertical FOV) drives a Live Camera; clean 35mm focal
+    from vcam_bridge.transform.fov import h_to_v
+    assert np.isclose(kfs[0]["view_angle"], h_to_v(37.8493, 16.0 / 9.0), atol=1e-6)
+
+
+def test_build_keyframes_aspect_override_changes_view_angle():
+    """The live render aspect (read off the camera) overrides config aspect for view angle,
+    so the vertical-FOV -> horizontal-FOV conversion is exact at any output resolution."""
+    import numpy as np
+    from vcam_bridge.domain.models import CameraTrack
+    from vcam_bridge.cli.commands.convert import build_keyframes
+    from vcam_bridge.config import load_config
+    from vcam_bridge.transform.fov import h_to_v
+    track = CameraTrack(fps=30.0, camera="Cam", frames=[
+        {"idx": 0, "t_sec": 0.0, "T": _FIX_T0, "fov_h_deg": 37.8493}])
+    _, _, kf_cfg = build_keyframes(track, load_config(None))                        # config 16/9
+    _, _, kf_ovr = build_keyframes(track, load_config(None), aspect_override=1.6)   # 16:10
+    assert np.isclose(kf_cfg[0]["view_angle"], h_to_v(37.8493, 16.0 / 9.0), atol=1e-9)
+    assert np.isclose(kf_ovr[0]["view_angle"], h_to_v(37.8493, 1.6), atol=1e-9)
+    assert kf_cfg[0]["view_angle"] != kf_ovr[0]["view_angle"]
 
 
 def test_convert_dry_run_inject_script_has_populated_keys(sample_track_json):
@@ -114,28 +154,45 @@ def test_convert_rejects_partial_field_map(sample_track_json):
         convert_dry_run(str(sample_track_json), config=cfg, layer_uid="0xabc")
 
 
-def test_focus_m_zero_is_used_not_defaulted(tmp_path):
+def test_default_distance_ignores_frame_focus_m(tmp_path):
+    """Behaviour change: the default (no --pivot-distance) is always 0 and ignores the
+    frame's focus_m -- focus_m is only used in explicit "focus" mode."""
     import json
     from vcam_bridge.config import load_config
     from vcam_bridge.cli.commands.convert import convert_dry_run
     p = tmp_path / "t.json"
     p.write_text(json.dumps({"fps": 30, "camera": "c", "frames": [
         {"idx": 0, "t_sec": 0.0, "position": [0, 0, 0], "rotation_deg": [0, 0, 0],
-         "fov_h_deg": 60, "focus_m": 0.0}]}))
+         "fov_h_deg": 60, "focus_m": 5.0}]}))   # focus_m present but must be ignored
     _, data = convert_dry_run(str(p), config=load_config(None), layer_uid="0xabc")
     assert data["dry_run_plan"]["keyframes"][0]["distance"] == 0.0
 
 
-def test_focus_m_none_defaults_to_one(tmp_path):
+def test_distance_defaults_to_zero(tmp_path):
+    """Default (no --pivot-distance) -> distance 0 so pivot == camera world position."""
     import json
     from vcam_bridge.config import load_config
     from vcam_bridge.cli.commands.convert import convert_dry_run
     p = tmp_path / "t.json"
     p.write_text(json.dumps({"fps": 30, "camera": "c", "frames": [
         {"idx": 0, "t_sec": 0.0, "position": [0, 0, 0], "rotation_deg": [0, 0, 0],
-         "fov_h_deg": 60}]}))
+         "fov_h_deg": 60, "focus_m": 2.0}]}))
     _, data = convert_dry_run(str(p), config=load_config(None), layer_uid="0xabc")
-    assert data["dry_run_plan"]["keyframes"][0]["distance"] == 1.0
+    assert data["dry_run_plan"]["keyframes"][0]["distance"] == 0.0
+
+
+def test_pivot_distance_focus_uses_frame_focus_value(tmp_path):
+    """--pivot-distance focus -> distance = frame focus_m."""
+    import json
+    from vcam_bridge.config import load_config
+    from vcam_bridge.cli.commands.convert import convert_dry_run
+    p = tmp_path / "t.json"
+    p.write_text(json.dumps({"fps": 30, "camera": "c", "frames": [
+        {"idx": 0, "t_sec": 0.0, "position": [0, 0, 0], "rotation_deg": [0, 0, 0],
+         "fov_h_deg": 60, "focus_m": 2.0}]}))
+    _, data = convert_dry_run(str(p), config=load_config(None), layer_uid="0xabc",
+                              pivot_distance_const="focus")
+    assert data["dry_run_plan"]["keyframes"][0]["distance"] == 2.0
 
 
 def test_pivot_distance_const_overrides_focus(sample_track_json):
@@ -190,7 +247,7 @@ def test_main_pivot_distance_focus_uses_frame_focus(sample_track_json):
     from vcam_bridge.cli.commands.convert import convert_dry_run
     from vcam_bridge.config import load_config
     _, data = convert_dry_run(str(sample_track_json), config=load_config(None),
-                              layer_uid="0xabc", pivot_distance_const=None)
+                              layer_uid="0xabc", pivot_distance_const="focus")
     assert data["dry_run_plan"]["keyframes"][0]["distance"] == 2.0
     assert data["dry_run_plan"]["keyframes"][1]["distance"] == 2.5
 

@@ -3,7 +3,6 @@ from __future__ import annotations
 import json as _json
 
 import numpy as np
-import requests as _requests
 
 from vcam_bridge.designer.client import DesignerClient
 from vcam_bridge.designer.codegen import build_inject_script
@@ -116,12 +115,9 @@ def verify_keys_persistence(client: DesignerClient, *, layer_uid: str, fields: d
     return {"ok": True, "max_errors": max_errors, "total_keys": total_keys}
 
 
-def _gototime(host: str, t_sec: float) -> None:
-    try:
-        _requests.post("http://%s/api/session/transport/gototime" % host,
-                       json={"time": t_sec}, timeout=5)
-    except _requests.RequestException:
-        pass
+def _gototime(client: DesignerClient, t_sec: float) -> None:
+    # 走注入的 transport（macOS curl 可用）；失败以 ExternalError 上抛，不再静默用陈旧读数
+    client._t.post_json(client.host, "/api/session/transport/gototime", {"time": t_sec})
 
 
 def verify_world_pose(client: DesignerClient, *, layer_uid: str, vc_uid: str, keys: list[dict],
@@ -155,7 +151,7 @@ def verify_world_pose(client: DesignerClient, *, layer_uid: str, vc_uid: str, ke
     max_err = 0.0
     sampled = 0
     for _n, idx in enumerate(indices):
-        _gototime(client.host, _goto_secs[_n])
+        _gototime(client, _goto_secs[_n])
         payload = {"vc_uid": vc_uid}
         script = ("import json\npayload = json.loads(" + repr(_json.dumps(payload)) + ")\n"
                   "vc = None\nfor c in state.stage.cameras:\n"

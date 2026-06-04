@@ -13,6 +13,8 @@ class Transport(Protocol):
 
     def get_json(self, host: str, path: str, timeout_s: float | None = None) -> dict[str, Any]: ...
 
+    def post_json(self, host: str, path: str, body: dict, timeout_s: float | None = None) -> dict[str, Any]: ...
+
 
 class RequestsTransport:
     """Real HTTP transport using a persistent requests.Session for connection reuse."""
@@ -43,6 +45,17 @@ class RequestsTransport:
             return r.json()
         except requests.RequestException as exc:
             raise ExternalError("Designer HTTP request failed: %s" % exc, details={"host": host, "path": path}) from exc
+        except ValueError as exc:
+            raise ExternalError("Designer returned a non-JSON response", details={"host": host, "path": path}) from exc
+
+    def post_json(self, host, path, body, timeout_s=None):
+        import requests
+        try:
+            r = self._session.post(f"http://{host}{path}", json=body, timeout=timeout_s)
+            r.raise_for_status()
+            return r.json() if r.content else {}
+        except requests.RequestException as exc:
+            raise ExternalError("Designer HTTP POST failed: %s" % exc, details={"host": host, "path": path}) from exc
         except ValueError as exc:
             raise ExternalError("Designer returned a non-JSON response", details={"host": host, "path": path}) from exc
 
@@ -87,6 +100,23 @@ class CurlTransport:
         except (json.JSONDecodeError, OSError) as exc:
             raise ExternalError("curl transport error: %s" % exc, details={"host": host, "path": path}) from exc
 
+    def post_json(self, host, path, body, timeout_s=None):
+        import json, subprocess
+        cmd = ["curl", "-s", "-X", "POST", f"http://{host}{path}",
+               "-H", "Content-Type: application/json", "-d", json.dumps(body)]
+        if timeout_s:
+            cmd += ["--connect-timeout", str(int(timeout_s)), "-m", str(int(timeout_s))]
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s or 30)
+            if proc.returncode != 0:
+                raise ExternalError("curl failed (rc=%s): %s" % (proc.returncode, proc.stderr),
+                                    details={"host": host, "path": path})
+            return json.loads(proc.stdout) if proc.stdout.strip() else {}
+        except subprocess.TimeoutExpired:
+            raise ExternalError("curl timed out", details={"host": host, "path": path, "timeout": timeout_s})
+        except (json.JSONDecodeError, OSError) as exc:
+            raise ExternalError("curl transport error: %s" % exc, details={"host": host, "path": path}) from exc
+
 
 class FakeTransport:
     """Test double. execute_responses are returned in order; json_responses keyed by path."""
@@ -95,6 +125,7 @@ class FakeTransport:
         self._execute = list(execute_responses or [])
         self._json = dict(json_responses or {})
         self.executed: list[dict[str, Any]] = []
+        self.posted_json: list = []
         self.idx = 0
 
     def post_execute(self, host, script, module_name=None, timeout_s=None):
@@ -105,3 +136,7 @@ class FakeTransport:
 
     def get_json(self, host, path, timeout_s=None):
         return self._json[path]
+
+    def post_json(self, host, path, body, timeout_s=None):
+        self.posted_json.append((host, path, body))
+        return {}

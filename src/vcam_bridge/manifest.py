@@ -31,7 +31,7 @@ def build_manifest() -> dict[str, Any]:
         _op("targets.list", "Enumerate AnimateCameraControl layers",
             writes=False, idempotent=True, destructive=False, external=True,
             exit_codes=[0, 2, 4, 8], dry_run=False, stdin=False),
-        _op("vc.list", "Enumerate Virtual Cameras in the stage",
+        _op("vc.list", "Enumerate stage cameras (live + virtual)",
             writes=False, idempotent=True, destructive=False, external=True,
             exit_codes=[0, 2, 4, 8], dry_run=False, stdin=False),
         _op("config.init", "Write a default configuration file",

@@ -99,12 +99,13 @@ def test_convert_live_set_target_fail(sample_track_csv):
 def test_vc_list_command():
     from vcam_bridge.cli.commands import vc as vc_cmd
     ft = FakeTransport(
-        execute_responses=[_ok('[["VC1", "0x99"]]')],
+        execute_responses=[_ok('[["0x99", "objects/virtualcamera/VC1.apx", "VC1", "VirtualCamera"]]')],
         json_responses={"/api/session/status/session": {"isRunningSolo": True}},
     )
     op, data = vc_cmd.list_vcams(ft, host="localhost")
     assert op == "vc.list"
-    assert data["virtual_cameras"] == [{"name": "VC1", "uid": "0x99"}]
+    assert data["cameras"] == [{"name": "VC1", "uid": "0x99", "type": "virtual"}]
+    assert data["virtual_cameras"] == [{"name": "VC1", "uid": "0x99", "type": "virtual"}]
 
 
 def test_probe_command():

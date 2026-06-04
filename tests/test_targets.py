@@ -2,7 +2,7 @@ import pytest
 
 from vcam_bridge.designer.transport import FakeTransport
 from vcam_bridge.designer.client import DesignerClient
-from vcam_bridge.designer.targets import list_tracks, list_acc_layers, list_vcs, resolve_layer_uid
+from vcam_bridge.designer.targets import list_tracks, list_acc_layers, resolve_layer_uid
 from vcam_bridge.domain.errors import ConfigError, NotFoundError
 
 
@@ -28,12 +28,6 @@ def test_list_acc_layers_filters_exact_module():
     c = DesignerClient(ft, "localhost")
     assert list_acc_layers(c) == [{"name": "Ctrl", "uid": "0xa"}]   # 仅精确 AnimateCamera
     assert "moduleType" in ft.executed[0]["script"]
-
-
-def test_list_vcs_uses_execute():
-    ft = FakeTransport(execute_responses=[_ok('[["VC1", "0xdef"]]')])
-    c = DesignerClient(ft, "localhost")
-    assert list_vcs(c) == [{"name": "VC1", "uid": "0xdef"}]
 
 
 _LAYERS = [{"name": "AnimateCameraControl", "uid": "0x42be"},

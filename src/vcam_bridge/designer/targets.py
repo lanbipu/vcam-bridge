@@ -23,12 +23,13 @@ for track in [local_state.track]:
 return json.dumps(out)
 '''
 
-_VC_ENUM_SCRIPT = '''
+# 全部 stage 相机的原始数据；派生/过滤放 Python 端（避免 Py2.7 脚本里 C++ 异常穿透）。
+# d3 Camera 无 .name（实测 AttributeError）；只读安全属性 uid/path/description/类型名。
+_CAMERA_ENUM_SCRIPT = '''
 import json
 out = []
 for cam in state.stage.cameras:
-    if getattr(cam, "isVirtual", False) or "Virtual" in str(type(cam).__name__):
-        out.append([cam.name, "0x%x" % cam.uid])
+    out.append(["0x%x" % cam.uid, str(cam.path), str(getattr(cam, "description", "")), str(type(cam).__name__)])
 return json.dumps(out)
 '''
 
@@ -48,9 +49,38 @@ def list_acc_layers(client: DesignerClient) -> list[dict]:
     return [{"name": n, "uid": u} for n, u, mt in rows if _module_name(mt) == _ACC_MODULE]
 
 
-def list_vcs(client: DesignerClient) -> list[dict]:
-    rows = client.execute(_VC_ENUM_SCRIPT).return_value or []
-    return [{"name": n, "uid": u} for n, u in rows]
+def _camera_name(path_str: str, description: str) -> str:
+    base = path_str.rsplit("/", 1)[-1]
+    if base.endswith(".apx"):
+        base = base[:-4]
+    return base or description
+
+
+def list_cameras(client: DesignerClient) -> list[dict]:
+    """枚举 stage 全部相机（live + virtual），名取 path 末段去 .apx（d3 Camera 无 .name）。"""
+    rows = client.execute(_CAMERA_ENUM_SCRIPT).return_value or []
+    return [{"name": _camera_name(p, d), "uid": u,
+             "type": "virtual" if "Virtual" in t else "live"} for u, p, d, t in rows]
+
+
+def resolve_camera_uid(cameras: list[dict], selector: str) -> str:
+    """把 selector（相机名或 '0x..' uid）解析成 uid。镜像 resolve_layer_uid 的消歧语义。"""
+    s = selector.strip()
+    if s.lower().startswith("0x"):
+        for cam in cameras:
+            if cam["uid"].lower() == s.lower():
+                return cam["uid"]
+        raise NotFoundError(f"no camera with uid {s}",
+                            details={"available_uids": [c["uid"] for c in cameras]})
+    matches = [cam for cam in cameras if cam["name"] == s]
+    if len(matches) == 1:
+        return matches[0]["uid"]
+    if not matches:
+        raise NotFoundError(f"no camera named {s!r}",
+                            details={"available": [{"name": c["name"], "type": c["type"]} for c in cameras]})
+    raise ConfigError(
+        f"ambiguous camera name {s!r}: {len(matches)} matches; pass --vc-uid instead",
+        details={"matches": [{"name": c["name"], "uid": c["uid"]} for c in matches]})
 
 
 def resolve_layer_uid(layers: list[dict], selector: str) -> str:

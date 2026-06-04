@@ -82,3 +82,53 @@ def test_build_inject_script_rejects_unmapped_value_key():
                "keys": [{"t_sec": 0.0, "values": {"fov": 60.0, "pivot.x": 1.0}}]}
     with pytest.raises(ValueError):
         build_inject_script(payload)
+
+
+def test_build_inject_script_empty_keys():
+    payload = {"layer_uid": "0x1", "start_offset_sec": 0.0,
+               "fields": {"fov": "fieldOfView"}, "keys": []}
+    script = build_inject_script(payload)
+    ast.parse(script)
+
+
+def test_validate_uid_various_valid():
+    assert validate_uid("0x0") == "0x0"
+    assert validate_uid("0xABCDEF0123456789") == "0xABCDEF0123456789"
+
+
+def test_validate_uid_rejects_empty():
+    with pytest.raises(ValueError):
+        validate_uid("")
+    with pytest.raises(ValueError):
+        validate_uid("0x")
+
+
+def test_validate_field_name_nested():
+    assert validate_field_name("camera_pivot.x") == "camera_pivot.x"
+    assert validate_field_name("a.b.c") == "a.b.c"
+    assert validate_field_name("simple") == "simple"
+
+
+def test_validate_field_name_rejects_spaces():
+    with pytest.raises(ValueError):
+        validate_field_name("has space")
+
+
+def test_unicode_in_payload_roundtrips():
+    payload = {"layer_uid": "0xff", "start_offset_sec": 0.0,
+               "fields": {"fov": "fieldOfView"},
+               "keys": [{"t_sec": 0.0, "values": {"fov": 60.0}}]}
+    script = build_inject_script(payload)
+    m = re.search(r"payload = json\.loads\((.*)\)\n", script)
+    embedded = ast.literal_eval(m.group(1))
+    assert json.loads(embedded) == payload
+
+
+def test_large_payload_survives():
+    keys = [{"t_sec": i * 0.01, "values": {"fov": 60.0 + i * 0.1}} for i in range(500)]
+    payload = {"layer_uid": "0xabc", "start_offset_sec": 0.0,
+               "fields": {"fov": "fieldOfView"}, "keys": keys}
+    script = build_inject_script(payload)
+    ast.parse(script)
+    m = re.search(r"payload = json\.loads\((.*)\)\n", script)
+    assert len(json.loads(ast.literal_eval(m.group(1)))["keys"]) == 500

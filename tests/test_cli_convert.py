@@ -121,3 +121,86 @@ def test_focus_m_zero_is_used_not_defaulted(tmp_path):
          "fov_h_deg": 60, "focus_m": 0.0}]}))
     _, data = convert_dry_run(str(p), config=load_config(None), layer_uid="0xabc")
     assert data["dry_run_plan"]["keyframes"][0]["distance"] == 0.0
+
+
+def test_focus_m_none_defaults_to_one(tmp_path):
+    import json
+    from vcam_bridge.config import load_config
+    from vcam_bridge.cli.commands.convert import convert_dry_run
+    p = tmp_path / "t.json"
+    p.write_text(json.dumps({"fps": 30, "camera": "c", "frames": [
+        {"idx": 0, "t_sec": 0.0, "position": [0, 0, 0], "rotation_deg": [0, 0, 0],
+         "fov_h_deg": 60}]}))
+    _, data = convert_dry_run(str(p), config=load_config(None), layer_uid="0xabc")
+    assert data["dry_run_plan"]["keyframes"][0]["distance"] == 1.0
+
+
+def test_pivot_distance_const_overrides_focus(sample_track_json):
+    from vcam_bridge.config import load_config
+    from vcam_bridge.cli.commands.convert import convert_dry_run
+    _, data = convert_dry_run(str(sample_track_json), config=load_config(None),
+                              layer_uid="0xabc", pivot_distance_const=5.0)
+    for kf in data["dry_run_plan"]["keyframes"]:
+        assert kf["distance"] == 5.0
+
+
+def test_stage_pose_determinant_always_positive():
+    import numpy as np
+    from vcam_bridge.cli.commands.convert import _stage_pose_for_frame
+    from vcam_bridge.transform.register import default_M
+    M = default_M()
+    M[:3, :3] *= -1
+    T = np.eye(4)
+    _, R = _stage_pose_for_frame(T, M)
+    assert np.isclose(np.linalg.det(R), 1.0, atol=1e-9)
+
+
+def test_main_config_not_found_exit_3(tmp_path, capsys):
+    import json
+    from vcam_bridge.cli.main import main
+    rc = main(["convert", "--fbx", "x.json", "--target-uid", "0x1", "--dry-run",
+               "--config", str(tmp_path / "nope.yaml"), "--output", "json"])
+    assert rc == 3
+    env = json.loads(capsys.readouterr().out)
+    assert env["error"]["code"] == "CONFIG_ERROR"
+
+
+def test_main_convert_live_without_yes_exit_6(sample_track_json, capsys):
+    import json
+    from vcam_bridge.cli.main import main
+    rc = main(["convert", "--fbx", str(sample_track_json), "--target-uid", "0xabc",
+               "--director", "host:80", "--vc-uid", "0xdef", "--output", "json"])
+    assert rc == 6
+    env = json.loads(capsys.readouterr().out)
+    assert env["error"]["code"] == "CONFLICT"
+
+
+def test_main_convert_live_without_vc_exit_3(sample_track_json, capsys):
+    import json
+    from vcam_bridge.cli.main import main
+    rc = main(["convert", "--fbx", str(sample_track_json), "--target-uid", "0xabc",
+               "--director", "host:80", "--yes", "--output", "json"])
+    assert rc == 3
+
+
+def test_main_pivot_distance_focus_uses_frame_focus(sample_track_json):
+    from vcam_bridge.cli.commands.convert import convert_dry_run
+    from vcam_bridge.config import load_config
+    _, data = convert_dry_run(str(sample_track_json), config=load_config(None),
+                              layer_uid="0xabc", pivot_distance_const=None)
+    assert data["dry_run_plan"]["keyframes"][0]["distance"] == 2.0
+    assert data["dry_run_plan"]["keyframes"][1]["distance"] == 2.5
+
+
+def test_main_generic_exception_exit_1(capsys, monkeypatch):
+    import json
+    from vcam_bridge.cli import main as main_mod
+    original_dispatch = main_mod._dispatch
+    def explode(args):
+        raise RuntimeError("unexpected boom")
+    monkeypatch.setattr(main_mod, "_dispatch", explode)
+    rc = main_mod.main(["manifest", "--output", "json"])
+    assert rc == 1
+    env = json.loads(capsys.readouterr().out)
+    assert env["error"]["code"] == "INTERNAL"
+    monkeypatch.setattr(main_mod, "_dispatch", original_dispatch)

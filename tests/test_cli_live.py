@@ -34,3 +34,52 @@ def test_convert_live_injects(sample_track_csv):
     assert data["written"] == 16
     assert data["vc_uid"] == "0xdef"
     assert len(ft.executed) == 2   # 1 set-target + 1 chunk
+
+
+def test_convert_live_invalid_uid():
+    from vcam_bridge.config import load_config
+    from vcam_bridge.cli.commands.convert import convert_live
+    from vcam_bridge.domain.errors import ConfigError
+    ft = FakeTransport(json_responses={}, execute_responses=[])
+    with pytest.raises(ConfigError, match="0x-hex"):
+        convert_live(ft, host="localhost", fbx="x.csv", config=load_config(None),
+                     layer_uid="not-hex", vc_uid="0xdef")
+
+
+def test_convert_live_set_target_fail(sample_track_csv):
+    from vcam_bridge.config import load_config
+    from vcam_bridge.cli.commands.convert import convert_live
+    from vcam_bridge.domain.errors import PartialError
+    ft = FakeTransport(
+        json_responses={"/api/session/status/session": {"isRunningSolo": True}},
+        execute_responses=[_ok('{"ok": false, "error": "acc layer not found"}')],
+    )
+    with pytest.raises(PartialError, match="camera target"):
+        convert_live(ft, host="localhost", fbx=str(sample_track_csv),
+                     config=load_config(None), layer_uid="0xabc", vc_uid="0xdef")
+
+
+def test_vc_list_command():
+    from vcam_bridge.cli.commands import vc as vc_cmd
+    ft = FakeTransport(
+        execute_responses=[_ok('[["VC1", "0x99"]]')],
+        json_responses={"/api/session/status/session": {"isRunningSolo": True}},
+    )
+    op, data = vc_cmd.list_vcams(ft, host="localhost")
+    assert op == "vc.list"
+    assert data["virtual_cameras"] == [{"name": "VC1", "uid": "0x99"}]
+
+
+def test_probe_command():
+    from vcam_bridge.cli.commands import probe as probe_cmd
+    ft = FakeTransport(
+        execute_responses=[
+            _ok('"AnimateCameraControl"'),
+            _ok('["camera_pivot.x", "fieldOfView"]'),
+        ],
+        json_responses={"/api/session/status/session": {"isRunningSolo": True}},
+    )
+    op, data = probe_cmd.run_probe(ft, host="localhost", probe_layer_uid="0xabc")
+    assert op == "probe"
+    assert data["module_type"] == "AnimateCameraControl"
+    assert "fieldOfView" in data["field_names"]

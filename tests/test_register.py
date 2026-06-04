@@ -35,3 +35,26 @@ def test_default_M_is_proper_rotation():
     scale = abs(np.linalg.det(Rm)) ** (1.0 / 3.0)
     R = Rm / scale
     assert np.isclose(np.linalg.det(R), 1.0, atol=1e-9)
+
+
+def test_umeyama_noisy_residual_bounded():
+    rng = np.random.default_rng(42)
+    src = rng.normal(size=(10, 3)) * 100
+    s = 0.01
+    R = np.array([[1, 0, 0], [0, 0, -1], [0, 1, 0]], dtype=float)
+    t = np.array([1.0, 2.0, 3.0])
+    dst = (s * (R @ src.T)).T + t + rng.normal(scale=0.001, size=(10, 3))
+    M = umeyama(src, dst)
+    out = apply_M(M, src)
+    residuals = np.linalg.norm(out - dst, axis=1)
+    assert residuals.max() < 0.01
+
+
+def test_apply_M_batch():
+    M = default_M()
+    pts = np.array([[100, 0, 0], [0, 200, 0], [0, 0, 300]], dtype=float)
+    out = apply_M(M, pts)
+    assert out.shape == (3, 3)
+    for i in range(3):
+        single = apply_M(M, pts[i:i+1, :])
+        assert np.allclose(out[i], single[0])

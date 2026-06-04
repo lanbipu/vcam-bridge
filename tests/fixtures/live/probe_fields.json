@@ -1,0 +1,21 @@
+{
+  "data": {
+    "module_type": "AnimateCamera",
+    "field_names": [
+      "camera",
+      "camera pivot.x",
+      "camera pivot.y",
+      "camera pivot.z",
+      "camera rotation.x",
+      "camera rotation.y",
+      "camera rotation.z",
+      "distance from pivot",
+      "view angle",
+      "camera locked",
+      "virtual camera zoom",
+      "virtual camera coordinates"
+    ],
+    "version": "R33",
+    "legacy_vc": false
+  }
+}

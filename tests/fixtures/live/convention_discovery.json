@@ -1,0 +1,30 @@
+{
+  "forward_axis": "+Z",
+  "euler_convention": "intrinsic_ZXY_heading_negated",
+  "euler_detail": "R = Rotation.from_euler('ZXY', [rz, rx, -ry], degrees=True)",
+  "position_formula": "C = pivot - dist * R^T @ [0,0,1]",
+  "position_detail": "R.T (transpose of rotation matrix built from written angles, not world matrix)",
+  "fov_control": "zoom_scale",
+  "fov_detail": "view angle does NOT drive VC FOV; use virtual camera zoom. zoom = target_focal / baseline_focal",
+  "baseline_focal_mm": 30.296,
+  "sensor_width_mm": 35.0,
+  "module_type_internal": "AnimateCamera",
+  "field_names_with_spaces": true,
+  "world_rotation_unit": "turns (1.0 = 360 degrees)",
+  "world_matrix_type": "Mat (4x4), translation in last row [m30,m31,m32]",
+  "render_update": "setFloat writes keyframe but VC world updates only after transport/gototime (render frame needed)",
+  "acc_field_names": {
+    "pivot.x": "camera pivot.x",
+    "pivot.y": "camera pivot.y",
+    "pivot.z": "camera pivot.z",
+    "rotation.x": "camera rotation.x",
+    "rotation.y": "camera rotation.y",
+    "rotation.z": "camera rotation.z",
+    "distance": "distance from pivot",
+    "fov": "view angle",
+    "camera": "camera",
+    "coord_system": "virtual camera coordinates",
+    "zoom": "virtual camera zoom",
+    "locked": "camera locked"
+  }
+}

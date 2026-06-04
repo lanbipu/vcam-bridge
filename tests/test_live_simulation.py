@@ -63,7 +63,7 @@ def test_convert_live_full_flow(tmp_path):
 
 def test_timeout_bisect_then_succeed(tmp_path):
     """3.8 — chunk1 ok, chunk2 timeout → bisect into 2 sub-chunks → all keys written."""
-    keys = [{"t_sec": i * 0.1, "values": {"fov": 60.0 + i}} for i in range(20)]
+    keys = [{"t_sec": i * 0.1, "values": {"zoom": 60.0 + i}} for i in range(20)]
     timeout = {"status": {"code": 1, "message": "TimeoutError: script"}, "returnValue": "null",
                "d3Log": "", "pythonLog": ""}
     ft = FakeTransport(execute_responses=[
@@ -73,7 +73,7 @@ def test_timeout_bisect_then_succeed(tmp_path):
         _ok('{"ok": true, "written": 5}'),     # sub-chunk 2b (keys 15-19) ok
     ])
     c = DesignerClient(ft, "localhost")
-    written = inject_keys(c, layer_uid="0x1", fields={"fov": "fieldOfView"}, keys=keys,
+    written = inject_keys(c, layer_uid="0x1", fields={"zoom": "virtual camera zoom"}, keys=keys,
                           start_offset_sec=0.0, chunk_size=10)
     assert written == 20
     assert len(ft.executed) == 4
@@ -81,7 +81,7 @@ def test_timeout_bisect_then_succeed(tmp_path):
 
 def test_double_timeout_cascading_bisect():
     """3.8 edge — two cascading timeouts, bisect down twice then succeed."""
-    keys = [{"t_sec": i * 0.1, "values": {"fov": 60.0}} for i in range(16)]
+    keys = [{"t_sec": i * 0.1, "values": {"zoom": 60.0}} for i in range(16)]
     timeout = {"status": {"code": 1, "message": "TimeoutError"}, "returnValue": "null",
                "d3Log": "", "pythonLog": ""}
     ft = FakeTransport(execute_responses=[
@@ -92,7 +92,7 @@ def test_double_timeout_cascading_bisect():
         _ok('{"ok": true, "written": 8}'),     # 8 keys ok (second half)
     ])
     c = DesignerClient(ft, "localhost")
-    written = inject_keys(c, layer_uid="0x1", fields={"fov": "fieldOfView"}, keys=keys,
+    written = inject_keys(c, layer_uid="0x1", fields={"zoom": "virtual camera zoom"}, keys=keys,
                           start_offset_sec=0.0, chunk_size=16, min_chunk=4)
     assert written == 16
 
@@ -135,6 +135,6 @@ def test_build_keyframes_all_canonical_fields(tmp_path):
     assert len(keys) == 1
     vals = keys[0]["values"]
     for canon in ("pivot.x", "pivot.y", "pivot.z", "rotation.x", "rotation.y",
-                  "rotation.z", "distance", "fov"):
+                  "rotation.z", "distance", "zoom"):
         assert canon in vals, f"missing canonical key {canon}"
         assert isinstance(vals[canon], float), f"{canon} is not float"

@@ -5,23 +5,26 @@ from vcam_bridge.config import load_config
 def test_convert_dry_run_builds_plan(sample_track_json):
     cfg = load_config(None)
     op, data = convert_dry_run(str(sample_track_json), config=cfg,
-                               layer_uid="0xabc", fov_axis="horizontal")
+                               layer_uid="0xabc")
     assert op == "convert"
     plan = data["dry_run_plan"]
     assert plan["frame_count"] == 2
     assert len(plan["keyframes"]) == 2
     kf0 = plan["keyframes"][0]
-    assert set(kf0.keys()) >= {"idx", "t_sec", "pivot", "rotation", "distance", "fov"}
+    assert set(kf0.keys()) >= {"idx", "t_sec", "pivot", "rotation", "distance", "zoom"}
     # injection script generated and references the layer uid as data
     assert "0xabc" in data["inject_script"]
     assert "json.loads" in data["inject_script"]
 
 
-def test_convert_dry_run_fov_horizontal_passthrough(sample_track_json):
+def test_convert_dry_run_zoom_computed(sample_track_json):
+    import math
+    from vcam_bridge.transform.fov import hfov_to_zoom
     cfg = load_config(None)
-    _, data = convert_dry_run(str(sample_track_json), config=cfg,
-                              layer_uid="0xabc", fov_axis="horizontal")
-    assert data["dry_run_plan"]["keyframes"][0]["fov"] == 60.0
+    _, data = convert_dry_run(str(sample_track_json), config=cfg, layer_uid="0xabc")
+    kf = data["dry_run_plan"]["keyframes"][0]
+    expected_zoom = hfov_to_zoom(60.0, cfg.calibration.baseline_focal_mm, cfg.calibration.sensor_width_mm)
+    assert abs(kf["zoom"] - expected_zoom) < 0.001
 
 
 def test_main_convert_dry_run_json(sample_track_json, capsys):
@@ -81,11 +84,11 @@ def test_convert_dry_run_inject_script_has_populated_keys(sample_track_json):
     from vcam_bridge.cli.commands.convert import convert_dry_run
     cfg = load_config(None)
     _, data = convert_dry_run(str(sample_track_json), config=cfg,
-                              layer_uid="0xabc", fov_axis="horizontal")
+                              layer_uid="0xabc")
     m = re.search(r"payload = json\.loads\((.*)\)\n", data["inject_script"])
     pl = json.loads(ast.literal_eval(m.group(1)))
     assert len(pl["keys"]) == 2
-    assert "fov" in pl["keys"][0]["values"]
+    assert "zoom" in pl["keys"][0]["values"]
     assert "pivot.x" in pl["keys"][0]["values"]
     assert "timeToBeat" in data["inject_script"]
 
@@ -106,7 +109,7 @@ def test_convert_rejects_partial_field_map(sample_track_json):
     from vcam_bridge.domain.models import Config, Calibration
     from vcam_bridge.domain.errors import ConfigError
     from vcam_bridge.cli.commands.convert import convert_dry_run
-    cfg = Config(calibration=Calibration(field_map={"pivot.x": "camera_pivot.x"}))
+    cfg = Config(calibration=Calibration(field_map={"pivot.x": "camera pivot.x"}))
     with pytest.raises(ConfigError):
         convert_dry_run(str(sample_track_json), config=cfg, layer_uid="0xabc")
 

@@ -178,7 +178,7 @@ def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid,
             raise ConfigError("%s must be a 0x-hex uid: %s" % (label, exc), details={"value": u}) from exc
     cal = config.calibration
     track = _load_track(fbx, euler_order=cal.euler_order, blender_path=getattr(config, "blender_path", None))
-    field_map, keys, _ = build_keyframes(track, config, pivot_distance_const=pivot_distance_const)
+    field_map, keys, keyframes = build_keyframes(track, config, pivot_distance_const=pivot_distance_const)
     client = DesignerClient(transport, host)
     client.resolve_routing()
     setup = client.execute(_SET_TARGET_SCRIPT % {"layer": layer_uid, "vc": vc_uid}).return_value or {}
@@ -188,10 +188,21 @@ def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid,
                           start_offset_sec=start_offset_sec, chunk_size=chunk_size or config.chunk_size)
     verify_report = None
     if verify:
-        from vcam_bridge.designer.inject import verify_keys_persistence
+        from vcam_bridge.designer.inject import verify_keys_persistence, verify_world_pose
+        from vcam_bridge.transform.decompose import disguise_euler_to_matrix, forward_vector
         verify_report = verify_keys_persistence(
             client, layer_uid=layer_uid, fields=field_map, keys=keys,
             start_offset_sec=start_offset_sec,
             tol_pos=tol_pos, tol_rot=tol_rot, tol_zoom=tol_zoom)
+        expected_positions = []
+        for kf in keyframes:
+            R = disguise_euler_to_matrix(*kf["rotation"])
+            fwd = forward_vector(cal.forward_axis)
+            C = np.asarray(kf["pivot"]) - kf["distance"] * (R.T @ fwd)
+            expected_positions.append(C.tolist())
+        world_report = verify_world_pose(
+            client, vc_uid=vc_uid, keys=keys, start_offset_sec=start_offset_sec,
+            expected_positions=expected_positions, tol_pos=tol_pos)
+        verify_report["world_pose"] = world_report
     return "convert", {"written": written, "frames": len(keys), "layer_uid": layer_uid,
                        "vc_uid": vc_uid, "target_setup": setup, "verify": verify_report}

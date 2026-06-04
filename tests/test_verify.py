@@ -39,7 +39,6 @@ def test_verify_persistence_raises_on_tolerance():
 def test_verify_world_pose_passes():
     from vcam_bridge.designer.inject import verify_world_pose
     ft = FakeTransport(
-        json_responses={},
         execute_responses=[
             _ok('{"pos": [1.0, 0.0, -2.0]}'),
         ],
@@ -57,7 +56,6 @@ def test_verify_world_pose_passes():
 def test_verify_world_pose_raises():
     from vcam_bridge.designer.inject import verify_world_pose
     ft = FakeTransport(
-        json_responses={},
         execute_responses=[
             _ok('{"pos": [5.0, 5.0, 5.0]}'),
         ],

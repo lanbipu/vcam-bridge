@@ -121,6 +121,13 @@ def verify_world_pose(client: DesignerClient, *, vc_uid: str, keys: list[dict],
     for idx in indices:
         if idx >= len(expected_positions):
             continue
+        t_sec = start_offset_sec + keys[idx]["t_sec"]
+        try:
+            import requests as _req
+            _req.post("http://%s/api/session/transport/gototime" % client.host,
+                      json={"time": t_sec}, timeout=5)
+        except Exception:
+            pass
         payload = {"vc_uid": vc_uid}
         script = ("import json\npayload = json.loads(" + repr(_json.dumps(payload)) + ")\n"
                   "vc = None\nfor c in state.stage.cameras:\n"

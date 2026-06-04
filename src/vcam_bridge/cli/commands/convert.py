@@ -138,7 +138,7 @@ def build_keyframes(track, config: Config, *,
     """
     cal = config.calibration
     M = np.array(cal.M_ue2dis, dtype=float) if cal.M_ue2dis else default_M()
-    aspect = aspect_override if aspect_override else cal.aspect   # live render aspect when known
+    aspect = aspect_override if aspect_override is not None else cal.aspect   # live render aspect when known
 
     keyframes = []
     for fr in track.frames:
@@ -188,7 +188,7 @@ def build_keyframes(track, config: Config, *,
 
 
 def convert_dry_run(fbx_or_intermediate: str, *, config: Config,
-                    layer_uid: str,
+                    layer_uid: str, overwrite: bool = False,
                     pivot_distance_const: float | None = None) -> tuple[str, Any]:
     cal = config.calibration
     track = _load_track(fbx_or_intermediate, euler_order=cal.euler_order,
@@ -196,8 +196,9 @@ def convert_dry_run(fbx_or_intermediate: str, *, config: Config,
     field_map, keys, keyframes = build_keyframes(track, config,
                                                  pivot_distance_const=pivot_distance_const)
 
+    # 预览须如实反映 live：--overwrite 时脚本里含 stripToFirstKey 分支
     inject_payload = {"layer_uid": layer_uid, "start_offset_sec": 0.0,
-                      "fields": field_map, "keys": keys}
+                      "fields": field_map, "keys": keys, "overwrite": overwrite}
     inject_script = build_inject_script(inject_payload)
 
     data = {
@@ -217,7 +218,8 @@ def convert_dry_run(fbx_or_intermediate: str, *, config: Config,
 
 def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid,
                  pivot_distance_const=None, start_offset_sec=0.0, chunk_size=None,
-                 overwrite=False, verify=False, tol_pos=0.001, tol_rot=0.05, tol_zoom=0.05):
+                 overwrite=False, verify=False, tol_pos=0.001, tol_rot=0.05, tol_zoom=0.05,
+                 client=None):
     from vcam_bridge.designer.client import DesignerClient
     from vcam_bridge.designer.inject import inject_keys
     from vcam_bridge.designer.codegen import validate_uid
@@ -229,8 +231,9 @@ def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid,
             raise ConfigError("%s must be a 0x-hex uid: %s" % (label, exc), details={"value": u}) from exc
     cal = config.calibration
     track = _load_track(fbx, euler_order=cal.euler_order, blender_path=getattr(config, "blender_path", None))
-    client = DesignerClient(transport, host)
-    client.resolve_routing()
+    if client is None:   # 直给 uid 路径自建并路由；name 解析路径复用 main 已路由的 client（免二次 resolve_routing）
+        client = DesignerClient(transport, host)
+        client.resolve_routing()
     render_aspect = _read_camera_aspect(client, vc_uid)   # exact view-angle conversion
     aspect_source = "live" if render_aspect is not None else "config-fallback"
     field_map, keys, keyframes = build_keyframes(track, config, pivot_distance_const=pivot_distance_const,

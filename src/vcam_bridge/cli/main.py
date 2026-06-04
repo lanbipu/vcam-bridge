@@ -157,7 +157,7 @@ def _dispatch(args: argparse.Namespace) -> tuple[str, Any]:
 
         if args.dry_run:
             return convert_cmd.convert_dry_run(args.fbx, config=cfg, layer_uid=layer_uid,
-                                               pivot_distance_const=const)
+                                               overwrite=args.overwrite, pivot_distance_const=const)
 
         # Live injection path — camera 解析推迟到这里（dry-run 不消费 vc_uid，不该被 --camera-name 逼连 director）。
         if not args.yes:
@@ -174,6 +174,7 @@ def _dispatch(args: argparse.Namespace) -> tuple[str, Any]:
         transport = _shared["transport"] or _make_transport(args)   # 复用 name 解析时已建的 transport
         return convert_cmd.convert_live(
             transport,
+            client=_shared["client"],   # name 解析路径已路由的 client（None=直给 uid，convert_live 自建）
             host=args.director,
             fbx=args.fbx,
             config=cfg,

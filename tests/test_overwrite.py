@@ -41,6 +41,34 @@ def test_overwrite_default_false_keeps_behavior_stable():
     assert '"overwrite": false' in ft.executed[0]["script"]
 
 
+def test_dry_run_overwrite_shows_strip_in_preview(sample_track_csv):
+    # 预览须如实反映 live：--overwrite 时 inject_script 含 stripToFirstKey 分支（review#2 finding[0]）
+    from vcam_bridge.config import load_config
+    from vcam_bridge.cli.commands.convert import convert_dry_run
+    _, on = convert_dry_run(str(sample_track_csv), config=load_config(None), layer_uid="0x1", overwrite=True)
+    _, off = convert_dry_run(str(sample_track_csv), config=load_config(None), layer_uid="0x1")
+    assert '"overwrite": true' in on["inject_script"]
+    assert '"overwrite": false' in off["inject_script"]
+
+
+def test_convert_live_reuses_passed_client_no_reroute(sample_track_csv, monkeypatch):
+    # name 解析路径传入已路由 client → convert_live 不再二次 resolve_routing（review#2 finding[3]）
+    from vcam_bridge.config import load_config
+    from vcam_bridge.cli.commands.convert import convert_live
+    from vcam_bridge.designer.client import DesignerClient
+    ft = FakeTransport(
+        json_responses={"/api/session/status/session": {"isRunningSolo": True}},
+        execute_responses=[_ok('{"aspect": 1.7777777778}'),
+                           _ok('{"ok": true, "vc_found": true, "note": []}'),
+                           _ok('{"ok": true, "written": 18}')])
+    pre = DesignerClient(ft, "localhost")
+    calls = []
+    monkeypatch.setattr(DesignerClient, "resolve_routing", lambda self: calls.append(1))
+    convert_live(ft, client=pre, host="localhost", fbx=str(sample_track_csv),
+                 config=load_config(None), layer_uid="0xabc", vc_uid="0xdef", chunk_size=100)
+    assert calls == []
+
+
 def test_overwrite_flag_threads_to_convert_live(monkeypatch, tmp_path):
     captured = {}
     monkeypatch.setattr("vcam_bridge.cli.commands.convert.convert_live",

@@ -31,9 +31,10 @@ class DesignerClient:
     def resolve_routing(self) -> None:
         st = self._t.get_json(self.host, "/api/session/status/session", self._timeout_s)
         if not st.get("isRunningSolo", True):
-            # NOTE: director.hostname carries no port; HTTP defaults to :80.
-            # Non-standard director ports must be handled at live-calibration time.
-            self.host = st["director"]["hostname"]
+            hostname = st["director"]["hostname"]
+            if ":" not in hostname and ":" in self.host:
+                hostname = "%s:%s" % (hostname, self.host.rsplit(":", 1)[1])
+            self.host = hostname
 
     @staticmethod
     def _fix_line_offset(msg: str) -> str:

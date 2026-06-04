@@ -12,25 +12,46 @@ from vcam_bridge.designer.codegen import build_inject_script
 
 _CANONICAL_FIELDS = ("pivot.x", "pivot.y", "pivot.z", "rotation.x", "rotation.y", "rotation.z", "distance", "fov")
 
-# Py2.7-safe script: find ACC layer by uid, try to disable Camera sequencing, return ok.
 _SET_TARGET_SCRIPT = '''
 import json
 local_state = state.localOrDirectorState()
 layer = None
 for l in local_state.track.layers:
-    if l.uid == int(%r, 16):
+    if l.uid == int(%(layer)r, 16):
         layer = l
         break
-note = "ok"
 if layer is None:
     return json.dumps({"ok": False, "error": "acc layer not found"})
+vc = None
+try:
+    for cam in state.stage.cameras:
+        if cam.uid == int(%(vc)r, 16):
+            vc = cam
+            break
+except Exception:
+    vc = None
+note = []
+if vc is None:
+    note.append("vc-not-found-by-uid")
 try:
     cam_seq = layer.findSequence("Camera")
-    if cam_seq is not None:
+    if cam_seq is not None and vc is not None:
         cam_seq.disableSequencing = True
+        cam_seq.sequence.setResource(layer.tStart, vc)
+        note.append("camera-target-set")
+    elif cam_seq is None:
+        note.append("camera-field-not-found")
 except Exception as e:
-    note = "target-set-skipped: " + str(e)
-return json.dumps({"ok": True, "note": note})
+    note.append("camera-target-skipped:" + str(e))
+try:
+    cs = layer.findSequence("coordinate system")
+    if cs is not None:
+        cs.disableSequencing = True
+        cs.sequence.setFloat(layer.tStart, 0)
+        note.append("coord-global-attempted")
+except Exception as e:
+    note.append("coord-skipped:" + str(e))
+return json.dumps({"ok": True, "vc_found": vc is not None, "note": note})
 '''
 
 
@@ -143,30 +164,26 @@ def convert_dry_run(fbx_or_intermediate: str, *, config: Config,
     return "convert", data
 
 
-def convert_live(transport, *, host: str, fbx: str, config: Config,
-                 layer_uid: str, vc_uid: str, fov_axis: str | None = None,
-                 pivot_distance_const: float | None = None,
-                 start_offset_sec: float = 0.0,
-                 chunk_size: int | None = None) -> tuple[str, Any]:
+def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid, fov_axis=None,
+                 pivot_distance_const=None, start_offset_sec=0.0, chunk_size=None):
     from vcam_bridge.designer.client import DesignerClient
     from vcam_bridge.designer.inject import inject_keys
-
+    from vcam_bridge.designer.codegen import validate_uid
+    from vcam_bridge.domain.errors import ConfigError, PartialError
+    for label, u in (("--target-uid", layer_uid), ("--vc-uid", vc_uid)):
+        try:
+            validate_uid(u)
+        except ValueError as exc:
+            raise ConfigError("%s must be a 0x-hex uid: %s" % (label, exc), details={"value": u}) from exc
     cal = config.calibration
-    track = _load_track(fbx, euler_order=cal.euler_order,
-                        blender_path=getattr(config, "blender_path", None))
-    field_map, keys, _ = build_keyframes(track, config, fov_axis=fov_axis,
-                                         pivot_distance_const=pivot_distance_const)
-
+    track = _load_track(fbx, euler_order=cal.euler_order, blender_path=getattr(config, "blender_path", None))
+    field_map, keys, _ = build_keyframes(track, config, fov_axis=fov_axis, pivot_distance_const=pivot_distance_const)
     client = DesignerClient(transport, host)
     client.resolve_routing()
-
-    # Set Camera target = VC and coordinate system = Global on the ACC layer
-    setup = _SET_TARGET_SCRIPT % layer_uid
-    client.execute(setup)
-
-    effective_chunk_size = chunk_size if chunk_size is not None else config.chunk_size
+    setup = client.execute(_SET_TARGET_SCRIPT % {"layer": layer_uid, "vc": vc_uid}).return_value or {}
+    if not setup.get("ok"):
+        raise PartialError("failed to set ACC camera target: %s" % setup.get("error", "unknown"), details=setup)
     written = inject_keys(client, layer_uid=layer_uid, fields=field_map, keys=keys,
-                          start_offset_sec=start_offset_sec,
-                          chunk_size=effective_chunk_size)
-    return "convert", {"written": written, "frames": len(keys), "vc_uid": vc_uid,
-                       "layer_uid": layer_uid}
+                          start_offset_sec=start_offset_sec, chunk_size=chunk_size or config.chunk_size)
+    return "convert", {"written": written, "frames": len(keys), "layer_uid": layer_uid,
+                       "vc_uid": vc_uid, "target_setup": setup}

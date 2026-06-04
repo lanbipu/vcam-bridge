@@ -9,7 +9,7 @@ from typing import Any
 from vcam_bridge.cli import render, runtime
 from vcam_bridge.cli.commands import meta as meta_cmd
 from vcam_bridge.config import load_config
-from vcam_bridge.domain.errors import ConfigError, VcamError
+from vcam_bridge.domain.errors import ConfigError, ConflictError, VcamError
 from vcam_bridge.envelope import EXIT_OK, EXIT_RUNTIME, EXIT_USAGE, error_envelope, success_envelope
 
 
@@ -38,7 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_conv.add_argument("--vc-uid", default=None)
     p_conv.add_argument("--pivot-distance", default=None)
     p_conv.add_argument("--chunk-size", type=int, default=None)
-    p_conv.add_argument("--verify", action="store_true", default=False)
+
 
     sub.add_parser("manifest", parents=[gp])
     sub.add_parser("version", parents=[gp])
@@ -114,6 +114,10 @@ def _dispatch(args: argparse.Namespace) -> tuple[str, Any]:
                                                pivot_distance_const=const)
 
         # Live injection path
+        if not args.yes:
+            raise ConflictError(
+                "live 'convert' writes to a production ACC layer; preview with --dry-run, then add --yes to confirm",
+                details={"hint": "run --dry-run first, then re-run with --yes"})
         if not args.director:
             raise ConfigError("--director HOST:PORT is required for live injection")
         if not args.vc_uid:

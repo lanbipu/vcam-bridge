@@ -17,3 +17,15 @@ def test_fake_transport_raises_when_exhausted():
     ft = FakeTransport(execute_responses=[])
     with pytest.raises(IndexError):
         ft.post_execute("localhost", "x")
+
+
+def test_requests_transport_maps_connection_error(monkeypatch):
+    import requests, pytest
+    from vcam_bridge.designer.transport import RequestsTransport
+    from vcam_bridge.domain.errors import ExternalError
+    t = RequestsTransport()
+    def boom(*a, **k):
+        raise requests.ConnectionError("refused")
+    monkeypatch.setattr(t._session, "post", boom)
+    with pytest.raises(ExternalError):
+        t.post_execute("localhost", "x")

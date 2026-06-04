@@ -49,3 +49,11 @@ def test_resolve_stays_local_when_solo():
     c = DesignerClient(ft, "localhost:80")
     c.resolve_routing()
     assert c.host == "localhost:80"
+
+
+def test_resolve_preserves_port_when_director_has_none():
+    ft = FakeTransport(json_responses={"/api/session/status/session":
+        {"isRunningSolo": False, "director": {"hostname": "10.0.0.9"}}})
+    c = DesignerClient(ft, "localhost:8080")
+    c.resolve_routing()
+    assert c.host == "10.0.0.9:8080"

@@ -204,7 +204,7 @@ def convert_dry_run(fbx_or_intermediate: str, *, config: Config,
         "dry_run_plan": {
             "frame_count": len(track.frames),
             "fps": track.fps,
-            "fov_control": "zoom_scale",
+            "fov_control": "view_angle+zoom",
             "keyframes": keyframes,
             "note": ("field map names and start_offset_sec are placeholders resolved live in "
                      "Plan 2 (P2 field map; --start-tc/--at-playhead); beats are computed "

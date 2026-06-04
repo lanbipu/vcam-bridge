@@ -165,7 +165,8 @@ def convert_dry_run(fbx_or_intermediate: str, *, config: Config,
 
 
 def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid,
-                 pivot_distance_const=None, start_offset_sec=0.0, chunk_size=None):
+                 pivot_distance_const=None, start_offset_sec=0.0, chunk_size=None,
+                 verify=False, tol_pos=0.001, tol_rot=0.05, tol_zoom=0.05):
     from vcam_bridge.designer.client import DesignerClient
     from vcam_bridge.designer.inject import inject_keys
     from vcam_bridge.designer.codegen import validate_uid
@@ -185,5 +186,12 @@ def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid,
         raise PartialError("failed to set ACC camera target: %s" % setup.get("error", "unknown"), details=setup)
     written = inject_keys(client, layer_uid=layer_uid, fields=field_map, keys=keys,
                           start_offset_sec=start_offset_sec, chunk_size=chunk_size or config.chunk_size)
+    verify_report = None
+    if verify:
+        from vcam_bridge.designer.inject import verify_keys_persistence
+        verify_report = verify_keys_persistence(
+            client, layer_uid=layer_uid, fields=field_map, keys=keys,
+            start_offset_sec=start_offset_sec,
+            tol_pos=tol_pos, tol_rot=tol_rot, tol_zoom=tol_zoom)
     return "convert", {"written": written, "frames": len(keys), "layer_uid": layer_uid,
-                       "vc_uid": vc_uid, "target_setup": setup}
+                       "vc_uid": vc_uid, "target_setup": setup, "verify": verify_report}

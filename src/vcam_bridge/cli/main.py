@@ -38,7 +38,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_conv.add_argument("--vc-uid", default=None)
     p_conv.add_argument("--pivot-distance", default=None)
     p_conv.add_argument("--chunk-size", type=int, default=None)
-
+    p_conv.add_argument("--verify", action="store_true", default=False)
+    p_conv.add_argument("--tol-pos", type=float, default=0.001)
+    p_conv.add_argument("--tol-rot", type=float, default=0.05)
+    p_conv.add_argument("--tol-zoom", type=float, default=0.05)
 
     sub.add_parser("manifest", parents=[gp])
     sub.add_parser("version", parents=[gp])
@@ -132,6 +135,10 @@ def _dispatch(args: argparse.Namespace) -> tuple[str, Any]:
             vc_uid=args.vc_uid,
             pivot_distance_const=const,
             chunk_size=args.chunk_size,
+            verify=args.verify,
+            tol_pos=args.tol_pos,
+            tol_rot=args.tol_rot,
+            tol_zoom=args.tol_zoom,
         )
 
     raise VcamError("no command given")

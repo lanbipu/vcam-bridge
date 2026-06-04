@@ -116,14 +116,17 @@ def verify_world_pose(client: DesignerClient, *, vc_uid: str, keys: list[dict],
         indices.append(len(keys) // 2)
     if len(keys) > 1:
         indices.append(len(keys) - 1)
+    import json as _json
     max_err = 0.0
     for idx in indices:
         if idx >= len(expected_positions):
             continue
-        script = ("import json\nvc = None\nfor c in state.stage.cameras:\n"
-                  "    if c.uid == int('%s', 16):\n        vc = c\n        break\n"
+        payload = {"vc_uid": vc_uid}
+        script = ("import json\npayload = json.loads(" + repr(_json.dumps(payload)) + ")\n"
+                  "vc = None\nfor c in state.stage.cameras:\n"
+                  "    if c.uid == int(payload['vc_uid'], 16):\n        vc = c\n        break\n"
                   "w = vc.world\nt = w.getTranslation()\n"
-                  "return json.dumps({'pos': [t.x, t.y, t.z]})" % vc_uid)
+                  "return json.dumps({'pos': [t.x, t.y, t.z]})")
         res = client.execute(script).return_value or {}
         actual = np.array(res.get("pos", [0, 0, 0]))
         expected = np.array(expected_positions[idx])

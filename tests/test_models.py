@@ -22,3 +22,14 @@ def test_stage_pose_and_keyframe():
     k = ACCKeyframe(idx=0, t_sec=0.0, pose=p)
     assert k.pose.distance == 1.5
     assert k.pose.rotation == (10, 20, 30)
+
+
+from vcam_bridge.domain.models import Calibration
+
+def test_calibration_defaults():
+    cal = Calibration()
+    assert cal.forward_axis == "+Z"
+    assert cal.euler_order == "disguise_zxy"
+    assert cal.baseline_focal_mm == 30.296
+    assert cal.sensor_width_mm == 35.0
+    assert "handedness" not in Calibration.model_fields

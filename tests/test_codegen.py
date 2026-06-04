@@ -109,11 +109,6 @@ def test_validate_field_name_nested():
     assert validate_field_name("simple") == "simple"
 
 
-def test_validate_field_name_rejects_spaces():
-    with pytest.raises(ValueError):
-        validate_field_name("has space")
-
-
 def test_unicode_in_payload_roundtrips():
     payload = {"layer_uid": "0xff", "start_offset_sec": 0.0,
                "fields": {"fov": "fieldOfView"},
@@ -132,3 +127,9 @@ def test_large_payload_survives():
     ast.parse(script)
     m = re.search(r"payload = json\.loads\((.*)\)\n", script)
     assert len(json.loads(ast.literal_eval(m.group(1)))["keys"]) == 500
+
+
+def test_validate_field_name_allows_spaces():
+    assert validate_field_name("camera pivot.x") == "camera pivot.x"
+    assert validate_field_name("distance from pivot") == "distance from pivot"
+    assert validate_field_name("virtual camera zoom") == "virtual camera zoom"

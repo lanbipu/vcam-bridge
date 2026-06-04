@@ -4,7 +4,7 @@ import json
 import re
 
 _UID_RE = re.compile(r"^0x[0-9a-fA-F]+$")
-_FIELD_RE = re.compile(r"^[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)*$")
+_FIELD_RE = re.compile(r"^[A-Za-z0-9_ ]+(\.[A-Za-z0-9_ ]+)*$")
 
 # Fixed Python 2.7 body. Reads only `payload`; no dynamic values are interpolated
 # into code. Field names / uids are DATA passed to findSequence / uid lookup.

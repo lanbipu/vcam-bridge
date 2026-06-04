@@ -40,6 +40,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_conv.add_argument("--target-name", default=None,
                         help="目标 ACC 层名（替代 --target-uid；经 --director 现场解析成 uid，须精确层名）")
     p_conv.add_argument("--vc-uid", default=None)
+    p_conv.add_argument("--camera-name", default=None,
+                        help="目标相机名（替代 --vc-uid；经 --director 现场解析成 uid，含 live/virtual）")
     p_conv.add_argument("--pivot-distance", default=None)
     p_conv.add_argument("--chunk-size", type=int, default=None)
     p_conv.add_argument("--verify", action="store_true", default=False)
@@ -124,24 +126,25 @@ def _dispatch(args: argparse.Namespace) -> tuple[str, Any]:
 
         from vcam_bridge.cli.commands import convert as convert_cmd
 
-        # 解析目标层 uid：--target-uid 直给；--target-name 经 director 现场枚举真 ACC + name→uid 解析。
+        # 解析目标层/相机 uid：--target-uid/--vc-uid 直给；--target-name/--camera-name 经 director 现场解析。
+        from vcam_bridge.designer.client import DesignerClient
+        from vcam_bridge.designer.targets import (list_acc_layers, resolve_layer_uid,
+                                                  list_cameras, resolve_camera_uid)
+        need_client = (not args.target_uid and args.target_name) or (not args.vc_uid and args.camera_name)
+        _client = None
+        if need_client:
+            if not args.director:
+                raise ConfigError("--target-name/--camera-name require --director to resolve names")
+            _client = DesignerClient(_make_transport(args), args.director)
+            _client.resolve_routing()
         layer_uid = args.target_uid
         if not layer_uid:
             if not args.target_name:
                 raise ConfigError("one of --target-uid / --target-name is required")
-            if not args.director:
-                raise ConfigError("--target-name requires --director to resolve the layer name to a uid")
-            from vcam_bridge.designer.client import DesignerClient
-            from vcam_bridge.designer.targets import list_acc_layers, resolve_layer_uid
-            if getattr(args, "curl", False):
-                from vcam_bridge.designer.transport import CurlTransport
-                _t = CurlTransport()
-            else:
-                from vcam_bridge.designer.transport import RequestsTransport
-                _t = RequestsTransport()
-            _client = DesignerClient(_t, args.director)
-            _client.resolve_routing()
             layer_uid = resolve_layer_uid(list_acc_layers(_client), args.target_name)
+        vc_uid = args.vc_uid
+        if not vc_uid and args.camera_name:
+            vc_uid = resolve_camera_uid(list_cameras(_client), args.camera_name)
 
         if args.dry_run:
             return convert_cmd.convert_dry_run(args.fbx, config=cfg, layer_uid=layer_uid,
@@ -154,21 +157,16 @@ def _dispatch(args: argparse.Namespace) -> tuple[str, Any]:
                 details={"hint": "run --dry-run first, then re-run with --yes"})
         if not args.director:
             raise ConfigError("--director HOST:PORT is required for live injection")
-        if not args.vc_uid:
-            raise ConfigError("--vc-uid is required for live injection")
-        if getattr(args, 'curl', False):
-            from vcam_bridge.designer.transport import CurlTransport
-            transport = CurlTransport()
-        else:
-            from vcam_bridge.designer.transport import RequestsTransport
-            transport = RequestsTransport()
+        if not vc_uid:
+            raise ConfigError("--vc-uid or --camera-name is required for live injection")
+        transport = _make_transport(args)
         return convert_cmd.convert_live(
             transport,
             host=args.director,
             fbx=args.fbx,
             config=cfg,
             layer_uid=layer_uid,
-            vc_uid=args.vc_uid,
+            vc_uid=vc_uid,
             pivot_distance_const=const,
             chunk_size=args.chunk_size,
             verify=args.verify,

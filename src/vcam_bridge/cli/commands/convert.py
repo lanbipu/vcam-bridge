@@ -49,10 +49,14 @@ except Exception as e:
 try:
     cs = layer.findSequence("virtual camera coordinates")
     if cs is not None:
-        cs.sequence.stripToFirstKey()
+        n_before = cs.sequence.nKeys()
+        if n_before > 1:
+            cs.sequence.stripToFirstKey()   # 仅多键(异常情形)才清，避免抹掉单键常态
         cs.disableSequencing = True
-        cs.sequence.setFloat(layer.tStart, 0.0)
+        cs.sequence.setFloat(layer.tStart, 0.0)   # 强制 Global=0（设计硬要求）
         note.append("coord-global-set")
+        if n_before > 1:
+            note.append("coord-keys-collapsed:%%d" %% n_before)
 except Exception as e:
     note.append("coord-skipped:" + str(e))
 return json.dumps({"ok": True, "vc_found": vc is not None, "note": note})
@@ -228,6 +232,7 @@ def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid,
     client = DesignerClient(transport, host)
     client.resolve_routing()
     render_aspect = _read_camera_aspect(client, vc_uid)   # exact view-angle conversion
+    aspect_source = "live" if render_aspect else "config-fallback"
     field_map, keys, keyframes = build_keyframes(track, config, pivot_distance_const=pivot_distance_const,
                                                  aspect_override=render_aspect)
     setup = client.execute(_SET_TARGET_SCRIPT % {"layer": layer_uid, "vc": vc_uid}).return_value or {}
@@ -236,6 +241,12 @@ def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid,
     if not setup.get("vc_found", True):   # 错/失效 --vc-uid：脚本 ok:True 但没绑相机，别静默成功
         raise PartialError("--vc-uid %s not found among stage cameras; ACC layer has no camera bound" % vc_uid,
                            details=setup)
+    warnings = []
+    if render_aspect is None:   # aspect 读不到→回退 config，非 16:9 输出会错 FOV，别静默（Codex#2）
+        warnings.append("render aspect not read from camera; FOV uses config aspect %.4f (wrong on non-16:9 output)"
+                        % cal.aspect)
+    if any(str(n).startswith("coord-keys-collapsed") for n in setup.get("note", [])):
+        warnings.append("existing 'virtual camera coordinates' animation was collapsed to Global")
     written = inject_keys(client, layer_uid=layer_uid, fields=field_map, keys=keys,
                           start_offset_sec=start_offset_sec, chunk_size=chunk_size or config.chunk_size)
     # FOV is driven by the injected "view angle" (Live Camera) / "virtual camera zoom" (VC)
@@ -259,6 +270,8 @@ def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid,
                 "note": "world-pose check skipped: solo session does not re-render on "
                         "gototime, so the readback would be stale. Confirm the camera "
                         "pose visually in the Designer GUI."}
+            verify_report["pose_verified"] = False
+            verify_report["level"] = "persistence-only"
         else:
             expected_positions = []
             for kf in keyframes:
@@ -268,7 +281,10 @@ def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid,
             verify_report["world_pose"] = verify_world_pose(
                 client, layer_uid=layer_uid, vc_uid=vc_uid, keys=keys, start_offset_sec=start_offset_sec,
                 expected_positions=expected_positions, tol_pos=tol_pos)
+            verify_report["pose_verified"] = True
+            verify_report["level"] = "world-pose"
     return "convert", {"written": written, "frames": len(keys), "layer_uid": layer_uid,
                        "vc_uid": vc_uid, "target_setup": setup, "verify": verify_report,
+                       "warnings": warnings, "aspect_source": aspect_source,
                        "fov_deg": f0.fov_h_deg, "render_aspect": render_aspect,
                        "sensor_width_mm": f0.sensor_width_mm, "focal_mm": f0.focal_mm}

@@ -126,40 +126,50 @@ def _dispatch(args: argparse.Namespace) -> tuple[str, Any]:
 
         from vcam_bridge.cli.commands import convert as convert_cmd
 
-        # 解析目标层/相机 uid：--target-uid/--vc-uid 直给；--target-name/--camera-name 经 director 现场解析。
+        # uid 直给与 name 现场解析互斥（同一目标同时给两者=冲突，避免静默丢弃 name）。
         from vcam_bridge.designer.client import DesignerClient
         from vcam_bridge.designer.targets import (list_acc_layers, resolve_layer_uid,
                                                   list_cameras, resolve_camera_uid)
-        need_client = (not args.target_uid and args.target_name) or (not args.vc_uid and args.camera_name)
-        _client = None
-        if need_client:
-            if not args.director:
-                raise ConfigError("--target-name/--camera-name require --director to resolve names")
-            _client = DesignerClient(_make_transport(args), args.director)
-            _client.resolve_routing()
+        if args.target_uid and args.target_name:
+            raise ConfigError("--target-uid and --target-name are mutually exclusive")
+        if args.vc_uid and args.camera_name:
+            raise ConfigError("--vc-uid and --camera-name are mutually exclusive")
+
+        # 共享一个 director client，懒建一次（layer 解析 dry-run 也要；camera 解析仅 live 要）。
+        _shared = {"transport": None, "client": None}
+
+        def _resolve_client():
+            if _shared["client"] is None:
+                if not args.director:
+                    raise ConfigError("--target-name/--camera-name require --director to resolve names")
+                _shared["transport"] = _make_transport(args)
+                _shared["client"] = DesignerClient(_shared["transport"], args.director)
+                _shared["client"].resolve_routing()
+            return _shared["client"]
+
         layer_uid = args.target_uid
         if not layer_uid:
             if not args.target_name:
                 raise ConfigError("one of --target-uid / --target-name is required")
-            layer_uid = resolve_layer_uid(list_acc_layers(_client), args.target_name)
-        vc_uid = args.vc_uid
-        if not vc_uid and args.camera_name:
-            vc_uid = resolve_camera_uid(list_cameras(_client), args.camera_name)
+            layer_uid = resolve_layer_uid(list_acc_layers(_resolve_client()), args.target_name)
 
         if args.dry_run:
             return convert_cmd.convert_dry_run(args.fbx, config=cfg, layer_uid=layer_uid,
                                                pivot_distance_const=const)
 
-        # Live injection path
+        # Live injection path — camera 解析推迟到这里（dry-run 不消费 vc_uid，不该被 --camera-name 逼连 director）。
         if not args.yes:
             raise ConflictError(
                 "live 'convert' writes to a production ACC layer; preview with --dry-run, then add --yes to confirm",
                 details={"hint": "run --dry-run first, then re-run with --yes"})
         if not args.director:
             raise ConfigError("--director HOST:PORT is required for live injection")
+        vc_uid = args.vc_uid
+        if not vc_uid and args.camera_name:
+            vc_uid = resolve_camera_uid(list_cameras(_resolve_client()), args.camera_name)
         if not vc_uid:
             raise ConfigError("--vc-uid or --camera-name is required for live injection")
-        transport = _make_transport(args)
+        transport = _shared["transport"] or _make_transport(args)   # 复用 name 解析时已建的 transport
         return convert_cmd.convert_live(
             transport,
             host=args.director,

@@ -138,5 +138,5 @@ class FakeTransport:
         return self._json[path]
 
     def post_json(self, host, path, body, timeout_s=None):
-        self.posted_json.append((host, path, body))
+        self.posted_json.append((host, path, body, timeout_s))
         return {}

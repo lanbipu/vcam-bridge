@@ -117,8 +117,9 @@ def verify_keys_persistence(client: DesignerClient, *, layer_uid: str, fields: d
 
 
 def _gototime(client: DesignerClient, t_sec: float) -> None:
-    # 走注入的 transport（macOS curl 可用）；失败以 ExternalError 上抛，不再静默用陈旧读数
-    client._t.post_json(client.host, "/api/session/transport/gototime", {"time": t_sec})
+    # 走注入的 transport（macOS curl 可用）；失败以 ExternalError 上抛，不再静默用陈旧读数。
+    # 必须线程 client._timeout_s——否则 requests 路径 timeout=None 会无限阻塞（degrade 的 try/except 救不了挂死）。
+    client._t.post_json(client.host, "/api/session/transport/gototime", {"time": t_sec}, client._timeout_s)
 
 
 def verify_world_pose(client: DesignerClient, *, layer_uid: str, vc_uid: str, keys: list[dict],

@@ -63,43 +63,28 @@ def list_cameras(client: DesignerClient) -> list[dict]:
              "type": "virtual" if "Virtual" in t else "live"} for u, p, d, t in rows]
 
 
-def resolve_camera_uid(cameras: list[dict], selector: str) -> str:
-    """把 selector（相机名或 '0x..' uid）解析成 uid。镜像 resolve_layer_uid 的消歧语义。"""
+def _resolve_uid(items: list[dict], selector: str, *, kind: str, uid_flag: str) -> str:
+    """name 或 '0x..' uid → uid（大小写不敏感）。0 匹配 → NotFoundError，多匹配 → ConfigError
+    （歧义，提示改用 uid_flag）。现场解析不缓存。resolve_layer_uid/resolve_camera_uid 共用。"""
     s = selector.strip()
     if s.lower().startswith("0x"):
-        for cam in cameras:
-            if cam["uid"].lower() == s.lower():
-                return cam["uid"]
-        raise NotFoundError(f"no camera with uid {s}",
-                            details={"available_uids": [c["uid"] for c in cameras]})
-    matches = [cam for cam in cameras if cam["name"] == s]
+        for it in items:
+            if it["uid"].lower() == s.lower():
+                return it["uid"]
+        raise NotFoundError(f"no {kind} with uid {s}", details={"available_uids": [i["uid"] for i in items]})
+    matches = [it for it in items if it["name"] == s]
     if len(matches) == 1:
         return matches[0]["uid"]
     if not matches:
-        raise NotFoundError(f"no camera named {s!r}",
-                            details={"available": [{"name": c["name"], "type": c["type"]} for c in cameras]})
-    raise ConfigError(
-        f"ambiguous camera name {s!r}: {len(matches)} matches; pass --vc-uid instead",
-        details={"matches": [{"name": c["name"], "uid": c["uid"]} for c in matches]})
+        raise NotFoundError(f"no {kind} named {s!r}",
+                            details={"available": [{"name": i["name"]} for i in items]})
+    raise ConfigError(f"ambiguous {kind} name {s!r}: {len(matches)} matches; pass {uid_flag} instead",
+                      details={"matches": [{"name": i["name"], "uid": i["uid"]} for i in matches]})
+
+
+def resolve_camera_uid(cameras: list[dict], selector: str) -> str:
+    return _resolve_uid(cameras, selector, kind="camera", uid_flag="--vc-uid")
 
 
 def resolve_layer_uid(layers: list[dict], selector: str) -> str:
-    """把 selector（layer name 或 '0x..' uid）解析成 uid。layers 为已过滤的真 ACC 层 [{name, uid}]。
-    uid 直给则校验存在（大小写不敏感）；name 精确匹配：0 匹配 → NotFoundError，
-    多匹配 → ConfigError（歧义，提示改用 --target-uid）。每次调用现场解析，不缓存。"""
-    s = selector.strip()
-    if s.lower().startswith("0x"):
-        for layer in layers:
-            if layer["uid"].lower() == s.lower():
-                return layer["uid"]
-        raise NotFoundError(f"no ACC layer with uid {s}",
-                            details={"available_uids": [l["uid"] for l in layers]})
-    matches = [layer for layer in layers if layer["name"] == s]
-    if len(matches) == 1:
-        return matches[0]["uid"]
-    if not matches:
-        raise NotFoundError(f"no ACC layer named {s!r}",
-                            details={"available_names": [l["name"] for l in layers]})
-    raise ConfigError(
-        f"ambiguous ACC layer name {s!r}: {len(matches)} matches; pass --target-uid instead",
-        details={"matches": [{"name": l["name"], "uid": l["uid"]} for l in matches]})
+    return _resolve_uid(layers, selector, kind="ACC layer", uid_flag="--target-uid")

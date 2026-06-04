@@ -232,7 +232,7 @@ def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid,
     client = DesignerClient(transport, host)
     client.resolve_routing()
     render_aspect = _read_camera_aspect(client, vc_uid)   # exact view-angle conversion
-    aspect_source = "live" if render_aspect else "config-fallback"
+    aspect_source = "live" if render_aspect is not None else "config-fallback"
     field_map, keys, keyframes = build_keyframes(track, config, pivot_distance_const=pivot_distance_const,
                                                  aspect_override=render_aspect)
     setup = client.execute(_SET_TARGET_SCRIPT % {"layer": layer_uid, "vc": vc_uid}).return_value or {}
@@ -282,9 +282,10 @@ def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid,
                 client, layer_uid=layer_uid, vc_uid=vc_uid, keys=keys, start_offset_sec=start_offset_sec,
                 expected_positions=expected_positions, tol_pos=tol_pos)
             verify_report["world_pose"] = wp
-            # world_pose 可能 degrade 成 skip（ok=None）：那样就不是真验证过位姿
-            verify_report["pose_verified"] = bool(wp.get("ok"))
-            verify_report["level"] = "world-pose" if wp.get("ok") else "persistence-only"
+            # world_pose 可能 degrade 成 skip（ok=None）或 0 采样：那都不算真验证过位姿
+            _pose_ok = bool(wp.get("ok")) and wp.get("sampled", 0) > 0
+            verify_report["pose_verified"] = _pose_ok
+            verify_report["level"] = "world-pose" if _pose_ok else "persistence-only"
     return "convert", {"written": written, "frames": len(keys), "layer_uid": layer_uid,
                        "vc_uid": vc_uid, "target_setup": setup, "verify": verify_report,
                        "warnings": warnings, "aspect_source": aspect_source,

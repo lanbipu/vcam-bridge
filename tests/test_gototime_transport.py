@@ -4,8 +4,11 @@ def test_gototime_routes_through_transport():
     from vcam_bridge.designer.client import DesignerClient
     from vcam_bridge.designer import inject
     ft = FakeTransport()
-    inject._gototime(DesignerClient(ft, "h:80"), 2.5)
-    assert ft.posted_json[-1] == ("h:80", "/api/session/transport/gototime", {"time": 2.5})
+    c = DesignerClient(ft, "h:80")
+    inject._gototime(c, 2.5)
+    # host/path/body 正确，且必须线程 client._timeout_s（否则 requests timeout=None 无限阻塞）
+    assert ft.posted_json[-1] == ("h:80", "/api/session/transport/gototime", {"time": 2.5}, c._timeout_s)
+    assert c._timeout_s == 30.0
 
 
 def test_inject_module_has_no_hardcoded_requests():

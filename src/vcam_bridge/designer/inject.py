@@ -6,7 +6,8 @@ import numpy as np
 
 from vcam_bridge.designer.client import DesignerClient
 from vcam_bridge.designer.codegen import build_inject_script
-from vcam_bridge.domain.errors import DesignerTimeoutError, PartialError, VerifyToleranceError
+from vcam_bridge.domain.errors import (DesignerTimeoutError, ExternalError, PartialError,
+                                       VerifyToleranceError)
 
 
 def chunk_keys(keys: list[dict], size: int) -> list[list[dict]]:
@@ -131,9 +132,14 @@ def verify_world_pose(client: DesignerClient, *, layer_uid: str, vc_uid: str, ke
     if len(keys) > 1:
         indices.append(len(keys) - 1)
     indices = [i for i in indices if i < len(expected_positions)]
-    # keys 注入在 beat = tStart + timeToBeat(start_offset + t_sec)（与 codegen/inject 一致）。gototime
-    # 收的是秒，须把该 beat 转回时间 beatToTime(tStart + timeToBeat(...))，否则播头漏掉 tStart 偏移
-    # （非 solo + tStart!=0 时对正确注入误报）。tStart/timeToBeat/beatToTime 全在 Disguise 端算（变速安全）。
+    def _skip(reason, note):
+        # verify 在 inject 成功+持久化之后跑：基础设施失败（beatToTime/seek/读回）绝不能炸已成功的
+        # convert，degrade 成 skip（形如 convert.py 的 solo skip）。仅真正的 tolerance 违规才 raise。
+        return {"ok": None, "skipped": reason, "note": note}
+
+    # keys 注入在 beat = tStart + timeToBeat(start_offset + t_sec)。gototime 收秒，须把该 beat 转回时间
+    # beatToTime(...)，否则漏 tStart 偏移（非 solo + tStart!=0 时误报）。beatToTime 仅文档(spec §49)
+    # 未真机验证 → 必须容许软失败：算不出 seek 时间 = skip，不是 convert 失败。
     _t_secs = [start_offset_sec + keys[i]["t_sec"] for i in indices]
     _goto_payload = {"layer_uid": layer_uid, "t_secs": _t_secs}
     _goto_script = (
@@ -144,25 +150,42 @@ def verify_world_pose(client: DesignerClient, *, layer_uid: str, vc_uid: str, ke
         "if target is None:\n    return json.dumps({'error': 'layer not found'})\n"
         "out = [track.beatToTime(target.tStart + track.timeToBeat(t)) for t in payload['t_secs']]\n"
         "return json.dumps({'goto_secs': out})")
-    _gres = client.execute(_goto_script).return_value or {}
+    try:
+        _gres = client.execute(_goto_script).return_value or {}
+    except (ExternalError, DesignerTimeoutError) as exc:
+        return _skip("goto-compute-failed",
+                     "world-pose seek-time computation failed (%s); keyframes are persisted, "
+                     "skipping pose check -- confirm visually in the Designer GUI" % exc)
     if "error" in _gres:
-        raise PartialError("verify world pose: %s" % _gres["error"], details={"layer_uid": layer_uid})
-    _goto_secs = _gres.get("goto_secs", _t_secs)
+        return _skip("goto-compute-error",
+                     "world-pose seek-time computation returned %r; keyframes are persisted, skipping pose check"
+                     % _gres["error"])
+    _goto_secs = _gres.get("goto_secs")
+    if not isinstance(_goto_secs, list) or len(_goto_secs) != len(indices):
+        # 绝不退回裸秒（漏 tStart → 误报），也绝不让长度不符触发 IndexError
+        return _skip("goto-secs-invalid",
+                     "world-pose seek times missing or wrong length (got %r for %d samples); "
+                     "refusing raw-seconds fallback; skipping pose check" % (_goto_secs, len(indices)))
     max_err = 0.0
     sampled = 0
     for _n, idx in enumerate(indices):
-        _gototime(client, _goto_secs[_n])
-        payload = {"vc_uid": vc_uid}
-        script = ("import json\npayload = json.loads(" + repr(_json.dumps(payload)) + ")\n"
-                  "vc = None\nfor c in state.stage.cameras:\n"
-                  "    if c.uid == int(payload['vc_uid'], 16):\n        vc = c\n        break\n"
-                  "if vc is None:\n    return json.dumps({'error': 'vc not found'})\n"
-                  "w = vc.world\nt = w.getTranslation()\n"
-                  "return json.dumps({'pos': [t.x, t.y, t.z]})")
-        res = client.execute(script).return_value or {}
+        try:
+            _gototime(client, _goto_secs[_n])
+            payload = {"vc_uid": vc_uid}
+            script = ("import json\npayload = json.loads(" + repr(_json.dumps(payload)) + ")\n"
+                      "vc = None\nfor c in state.stage.cameras:\n"
+                      "    if c.uid == int(payload['vc_uid'], 16):\n        vc = c\n        break\n"
+                      "if vc is None:\n    return json.dumps({'error': 'vc not found'})\n"
+                      "w = vc.world\nt = w.getTranslation()\n"
+                      "return json.dumps({'pos': [t.x, t.y, t.z]})")
+            res = client.execute(script).return_value or {}
+        except (ExternalError, DesignerTimeoutError) as exc:
+            return _skip("seek-or-readback-failed",
+                         "world-pose seek/readback failed (%s); keyframes are persisted, skipping pose check" % exc)
         if "error" in res:
-            raise PartialError("verify world pose: %s" % res["error"],
-                               details={"vc_uid": vc_uid})
+            return _skip("readback-error",
+                         "world-pose readback returned %r; keyframes are persisted, skipping pose check"
+                         % res["error"])
         actual = np.array(res.get("pos", [0, 0, 0]))
         expected = np.array(expected_positions[idx])
         err = float(np.linalg.norm(actual - expected))

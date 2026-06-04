@@ -278,11 +278,13 @@ def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid,
                 C, _ = recompose({"pivot": kf["pivot"], "rotation": kf["rotation"],
                                   "distance": kf["distance"]}, forward_axis=cal.forward_axis)
                 expected_positions.append(C.tolist())
-            verify_report["world_pose"] = verify_world_pose(
+            wp = verify_world_pose(
                 client, layer_uid=layer_uid, vc_uid=vc_uid, keys=keys, start_offset_sec=start_offset_sec,
                 expected_positions=expected_positions, tol_pos=tol_pos)
-            verify_report["pose_verified"] = True
-            verify_report["level"] = "world-pose"
+            verify_report["world_pose"] = wp
+            # world_pose 可能 degrade 成 skip（ok=None）：那样就不是真验证过位姿
+            verify_report["pose_verified"] = bool(wp.get("ok"))
+            verify_report["level"] = "world-pose" if wp.get("ok") else "persistence-only"
     return "convert", {"written": written, "frames": len(keys), "layer_uid": layer_uid,
                        "vc_uid": vc_uid, "target_setup": setup, "verify": verify_report,
                        "warnings": warnings, "aspect_source": aspect_source,

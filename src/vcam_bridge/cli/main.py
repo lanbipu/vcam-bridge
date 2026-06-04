@@ -44,6 +44,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="目标相机名（替代 --vc-uid；经 --director 现场解析成 uid，含 live/virtual）")
     p_conv.add_argument("--pivot-distance", default=None)
     p_conv.add_argument("--chunk-size", type=int, default=None)
+    p_conv.add_argument("--overwrite", action="store_true", default=False,
+                        help="注入前清掉目标层动画字段的旧键（换不同长度/起点的 take 时避免残帧；同 take 重跑天然幂等，无需此项）")
     p_conv.add_argument("--verify", action="store_true", default=False)
     p_conv.add_argument("--tol-pos", type=float, default=0.001)
     p_conv.add_argument("--tol-rot", type=float, default=0.05)
@@ -179,6 +181,7 @@ def _dispatch(args: argparse.Namespace) -> tuple[str, Any]:
             vc_uid=vc_uid,
             pivot_distance_const=const,
             chunk_size=args.chunk_size,
+            overwrite=args.overwrite,
             verify=args.verify,
             tol_pos=args.tol_pos,
             tol_rot=args.tol_rot,

@@ -217,7 +217,7 @@ def convert_dry_run(fbx_or_intermediate: str, *, config: Config,
 
 def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid,
                  pivot_distance_const=None, start_offset_sec=0.0, chunk_size=None,
-                 verify=False, tol_pos=0.001, tol_rot=0.05, tol_zoom=0.05):
+                 overwrite=False, verify=False, tol_pos=0.001, tol_rot=0.05, tol_zoom=0.05):
     from vcam_bridge.designer.client import DesignerClient
     from vcam_bridge.designer.inject import inject_keys
     from vcam_bridge.designer.codegen import validate_uid
@@ -248,7 +248,8 @@ def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid,
     if any(str(n).startswith("coord-keys-collapsed") for n in setup.get("note", [])):
         warnings.append("existing 'virtual camera coordinates' animation was collapsed to Global")
     written = inject_keys(client, layer_uid=layer_uid, fields=field_map, keys=keys,
-                          start_offset_sec=start_offset_sec, chunk_size=chunk_size or config.chunk_size)
+                          start_offset_sec=start_offset_sec, chunk_size=chunk_size or config.chunk_size,
+                          overwrite=overwrite)
     # FOV is driven by the injected "view angle" (Live Camera) / "virtual camera zoom" (VC)
     # keyframes -- no separate lens edit needed. The camera focal-mm derives from the FOV.
     f0 = track.frames[0]

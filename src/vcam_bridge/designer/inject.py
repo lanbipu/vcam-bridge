@@ -16,9 +16,10 @@ def chunk_keys(keys: list[dict], size: int) -> list[list[dict]]:
     return [keys[i:i + size] for i in range(0, len(keys), size)]
 
 
-def _write_chunk(client: DesignerClient, layer_uid, fields, chunk, start_offset_sec) -> int:
+def _write_chunk(client: DesignerClient, layer_uid, fields, chunk, start_offset_sec,
+                 overwrite=False) -> int:
     payload = {"layer_uid": layer_uid, "start_offset_sec": start_offset_sec,
-               "fields": fields, "keys": chunk}
+               "fields": fields, "keys": chunk, "overwrite": overwrite}
     script = build_inject_script(payload)
     res = client.execute(script).return_value or {}
     if not res.get("ok"):
@@ -28,15 +29,22 @@ def _write_chunk(client: DesignerClient, layer_uid, fields, chunk, start_offset_
 
 
 def inject_keys(client: DesignerClient, *, layer_uid: str, fields: dict, keys: list[dict],
-                start_offset_sec: float, chunk_size: int, min_chunk: int = 8) -> int:
+                start_offset_sec: float, chunk_size: int, overwrite: bool = False,
+                min_chunk: int = 8) -> int:
     """Inject keyframes in chunks (one /execute per chunk). On a chunk TimeoutError,
-    halve that chunk and retry its halves (not a blind re-send), down to min_chunk."""
+    halve that chunk and retry its halves (not a blind re-send), down to min_chunk.
+    overwrite=True strips existing keys ONLY on the first written chunk (later chunks
+    must not re-strip, else they'd clear what earlier chunks just wrote; re-strip on a
+    timeout-bisected first half is harmless — stripToFirstKey on a 1-key seq is a no-op)."""
     total = 0
     pending = chunk_keys(keys, chunk_size)
+    first = True
     while pending:
         chunk = pending.pop(0)
         try:
-            total += _write_chunk(client, layer_uid, fields, chunk, start_offset_sec)
+            total += _write_chunk(client, layer_uid, fields, chunk, start_offset_sec,
+                                  overwrite=overwrite and first)
+            first = False
         except DesignerTimeoutError:
             if len(chunk) <= min_chunk:
                 raise

@@ -39,6 +39,9 @@ else:
     if missing:
         result = {"ok": False, "error": "missing fields", "missing": missing}
     else:
+        if payload.get("overwrite"):
+            for key in seqs:
+                seqs[key].sequence.stripToFirstKey()
         start_offset = payload["start_offset_sec"]
         written = 0
         for kf in payload["keys"]:

@@ -10,6 +10,9 @@ def _ok(rv):
     return {"status": {"code": 0}, "d3Log": "", "pythonLog": "", "returnValue": rv}
 
 
+_VC_OPTICS = _ok(json.dumps({"focal_mm": 22.97, "zoom_scale": 1.0, "sensor_w_mm": 35.0, "is_virtual": True}))
+
+
 def test_targets_list_command_returns_layers():
     ft = FakeTransport(
         execute_responses=[_ok(json.dumps([
@@ -30,7 +33,8 @@ def test_convert_live_injects(sample_track_csv):
     from vcam_bridge.cli.commands.convert import convert_live
     ft = FakeTransport(
         json_responses={"/api/session/status/session": {"isRunningSolo": True}},
-        execute_responses=[_ok('{"aspect": 1.7777777778}'),         # read render aspect
+        execute_responses=[_VC_OPTICS,                                # read vc optics
+                           _ok('{"aspect": 1.7777777778}'),         # read render aspect
                            _ok('{"ok": true, "note": []}'),         # set-target
                            _ok('{"ok": true, "written": 18}')],     # one chunk (2 frames x 9 fields)
     )
@@ -39,7 +43,7 @@ def test_convert_live_injects(sample_track_csv):
     assert op == "convert"
     assert data["written"] == 18
     assert data["vc_uid"] == "0xdef"
-    assert len(ft.executed) == 3   # read-aspect + set-target + 1 chunk
+    assert len(ft.executed) == 4   # vc-optics + read-aspect + set-target + 1 chunk
 
 
 def test_convert_live_rejects_unmatched_vc_uid(sample_track_csv):
@@ -49,7 +53,8 @@ def test_convert_live_rejects_unmatched_vc_uid(sample_track_csv):
     from vcam_bridge.domain.errors import PartialError
     ft = FakeTransport(
         json_responses={"/api/session/status/session": {"isRunningSolo": True}},
-        execute_responses=[_ok('{"aspect": 1.7777777778}'),
+        execute_responses=[_VC_OPTICS,
+                           _ok('{"aspect": 1.7777777778}'),
                            _ok('{"ok": true, "vc_found": false, "note": ["vc-not-found-by-uid"]}')],
     )
     with pytest.raises(PartialError):
@@ -64,7 +69,8 @@ def test_convert_live_verify_skips_world_pose_in_solo(sample_track_csv):
     from vcam_bridge.cli.commands.convert import convert_live
     ft = FakeTransport(
         json_responses={"/api/session/status/session": {"isRunningSolo": True}},
-        execute_responses=[_ok('{"aspect": 1.7777777778}'),            # read aspect
+        execute_responses=[_VC_OPTICS,                                   # vc optics
+                           _ok('{"aspect": 1.7777777778}'),            # read aspect
                            _ok('{"ok": true, "note": []}'),            # set-target
                            _ok('{"ok": true, "written": 18}'),         # inject chunk
                            _ok('{"max_errors": {}, "total_keys": 18}')],  # verify field values
@@ -72,9 +78,9 @@ def test_convert_live_verify_skips_world_pose_in_solo(sample_track_csv):
     op, data = convert_live(ft, host="localhost", fbx=str(sample_track_csv),
                             config=load_config(None), layer_uid="0xabc", vc_uid="0xdef",
                             chunk_size=100, verify=True)
-    assert data["verify"]["ok"] is True                       # field-value check ran
-    assert data["verify"]["world_pose"]["skipped"] == "solo"  # world-pose skipped
-    assert len(ft.executed) == 4   # aspect + set-target + chunk + verify-keys (no gototime/read)
+    assert data["verify"]["ok"] is True
+    assert data["verify"]["world_pose"]["skipped"] == "solo"
+    assert len(ft.executed) == 5   # vc-optics + aspect + set-target + chunk + verify-keys
 
 
 def test_convert_live_invalid_uid():
@@ -93,7 +99,8 @@ def test_convert_live_set_target_fail(sample_track_csv):
     from vcam_bridge.domain.errors import PartialError
     ft = FakeTransport(
         json_responses={"/api/session/status/session": {"isRunningSolo": True}},
-        execute_responses=[_ok('{"aspect": 1.7777777778}'),         # read render aspect
+        execute_responses=[_VC_OPTICS,
+                           _ok('{"aspect": 1.7777777778}'),
                            _ok('{"ok": false, "error": "acc layer not found"}')],
     )
     with pytest.raises(PartialError, match="camera target"):

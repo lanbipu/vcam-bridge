@@ -76,6 +76,64 @@ return json.dumps({"aspect": float(vc.aspectRatio)})
 '''
 
 
+_READ_VC_OPTICS_SCRIPT = '''
+import json
+vc = None
+for cam in state.stage.cameras:
+    if cam.uid == int(%(vc)r, 16):
+        vc = cam
+        break
+if vc is None:
+    return json.dumps(None)
+cls = str(type(vc).__name__)
+is_virtual = "Virtual" in cls
+info = {"focal_mm": float(vc.focalLengthMM), "sensor_w_mm": float(vc.sensorSizeMM.x), "is_virtual": is_virtual}
+if is_virtual:
+    info["zoom_scale"] = float(vc.zoomScale)
+else:
+    info["zoom_scale"] = None
+return json.dumps(info)
+'''
+
+
+def _read_vc_optics(client, vc_uid: str) -> dict | None:
+    try:
+        rv = client.execute(_READ_VC_OPTICS_SCRIPT % {"vc": vc_uid}).return_value
+        if rv is None:
+            return None
+        return rv
+    except Exception:
+        return None
+
+
+def _resolve_calibration(cfg: Config, vc_optics: dict | None) -> dict:
+    cal = cfg.calibration
+    explicit_baseline = "baseline_focal_mm" in cal.model_fields_set
+    explicit_sensor = "sensor_width_mm" in cal.model_fields_set
+
+    can_auto = (vc_optics is not None
+                and vc_optics.get("is_virtual") is True
+                and vc_optics.get("zoom_scale") is not None
+                and vc_optics["zoom_scale"] > 0)
+
+    if explicit_baseline:
+        baseline, b_src = cal.baseline_focal_mm, "config"
+    elif can_auto:
+        baseline, b_src = vc_optics["focal_mm"] / vc_optics["zoom_scale"], "vc-auto"
+    else:
+        baseline, b_src = cal.baseline_focal_mm, "default"
+
+    if explicit_sensor:
+        sensor, s_src = cal.sensor_width_mm, "config"
+    elif can_auto:
+        sensor, s_src = vc_optics["sensor_w_mm"], "vc-auto"
+    else:
+        sensor, s_src = cal.sensor_width_mm, "default"
+
+    return {"baseline": baseline, "sensor": sensor,
+            "baseline_source": b_src, "sensor_source": s_src}
+
+
 def _read_camera_aspect(client, vc_uid: str) -> float | None:
     """Read the target camera's actual render aspect (output resolution w/h) live, so the
     'view angle' (vertical FOV) -> horizontal FOV conversion is exact regardless of the
@@ -127,7 +185,9 @@ def _load_track(path: str, *, euler_order: str, blender_path: str | None = None)
 
 def build_keyframes(track, config: Config, *,
                     pivot_distance_const: float | str | None = None,
-                    aspect_override: float | None = None) -> tuple[dict, list, list]:
+                    aspect_override: float | None = None,
+                    baseline_override: float | None = None,
+                    sensor_override: float | None = None) -> tuple[dict, list, list]:
     """Extract keyframe data from a track + config.
 
     Returns:
@@ -138,7 +198,9 @@ def build_keyframes(track, config: Config, *,
     """
     cal = config.calibration
     M = np.array(cal.M_ue2dis, dtype=float) if cal.M_ue2dis else default_M()
-    aspect = aspect_override if aspect_override is not None else cal.aspect   # live render aspect when known
+    aspect = aspect_override if aspect_override is not None else cal.aspect
+    baseline = baseline_override if baseline_override is not None else cal.baseline_focal_mm
+    sensor = sensor_override if sensor_override is not None else cal.sensor_width_mm
 
     keyframes = []
     for fr in track.frames:
@@ -149,11 +211,11 @@ def build_keyframes(track, config: Config, *,
         elif pivot_distance_const is not None:
             d = float(pivot_distance_const)
         else:
-            d = 0.0   # default: pivot == camera world position (clean offset)
+            d = 0.0
         pose = decompose_pivot_orbit(C, R, d, forward_axis=cal.forward_axis,
                                      euler_order=cal.euler_order)
-        zoom = hfov_to_zoom(fr.fov_h_deg, cal.baseline_focal_mm, cal.sensor_width_mm)
-        view_angle = h_to_v(fr.fov_h_deg, aspect)   # vertical FOV: drives a Live Camera
+        zoom = hfov_to_zoom(fr.fov_h_deg, baseline, sensor)
+        view_angle = h_to_v(fr.fov_h_deg, aspect)
         keyframes.append({
             "idx": fr.idx, "t_sec": fr.t_sec,
             "pivot": pose["pivot"], "rotation": pose["rotation"],
@@ -209,11 +271,13 @@ def convert_dry_run(fbx_or_intermediate: str, *, config: Config,
             "fov_control": "view_angle+zoom",
             "keyframes": keyframes,
             "aspect_source": "config-default",
+            "baseline_source": "config-default",
             "sensor_width_mm": f0.sensor_width_mm if f0 else None,
             "focal_mm": f0.focal_mm if f0 else None,
-            "note": ("field map names and start_offset_sec are placeholders resolved live in "
-                     "Plan 2 (P2 field map; --start-tc/--at-playhead); beats are computed "
-                     "in-script via track.timeToBeat"),
+            "note": ("Zoom uses config-default baseline/sensor; live inject will "
+                     "auto-calibrate from the target VirtualCamera's actual lens. "
+                     "Field map names and start_offset_sec are placeholders resolved live; "
+                     "beats are computed in-script via track.timeToBeat."),
         },
         "inject_script": inject_script,
     }
@@ -235,13 +299,18 @@ def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid,
             raise ConfigError("%s must be a 0x-hex uid: %s" % (label, exc), details={"value": u}) from exc
     cal = config.calibration
     track = _load_track(fbx, euler_order=cal.euler_order, blender_path=getattr(config, "blender_path", None))
-    if client is None:   # 直给 uid 路径自建并路由；name 解析路径复用 main 已路由的 client（免二次 resolve_routing）
+    if client is None:
         client = DesignerClient(transport, host)
         client.resolve_routing()
-    render_aspect = _read_camera_aspect(client, vc_uid)   # exact view-angle conversion
+    vc_optics = _read_vc_optics(client, vc_uid)
+    render_aspect = _read_camera_aspect(client, vc_uid)
     aspect_source = "live" if render_aspect is not None else "config-fallback"
+    cal_result = _resolve_calibration(config, vc_optics)
+    baseline, sensor_w = cal_result["baseline"], cal_result["sensor"]
     field_map, keys, keyframes = build_keyframes(track, config, pivot_distance_const=pivot_distance_const,
-                                                 aspect_override=render_aspect)
+                                                 aspect_override=render_aspect,
+                                                 baseline_override=baseline,
+                                                 sensor_override=sensor_w)
     setup = client.execute(_SET_TARGET_SCRIPT % {"layer": layer_uid, "vc": vc_uid}).return_value or {}
     if not setup.get("ok"):
         raise PartialError("failed to set ACC camera target: %s" % setup.get("error", "unknown"), details=setup)
@@ -249,7 +318,9 @@ def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid,
         raise PartialError("--vc-uid %s not found among stage cameras; ACC layer has no camera bound" % vc_uid,
                            details=setup)
     warnings = []
-    if render_aspect is None:   # aspect 读不到→回退 config，非 16:9 输出会错 FOV，别静默（Codex#2）
+    if cal_result["baseline_source"] == "default" and vc_optics is None:
+        warnings.append("VC optics not read; baseline/sensor use config defaults (FOV may drift if VC lens differs)")
+    if render_aspect is None:
         warnings.append("render aspect not read from camera; FOV uses config aspect %.4f (wrong on non-16:9 output)"
                         % cal.aspect)
     if any(str(n).startswith("coord-keys-collapsed") for n in setup.get("note", [])):
@@ -294,8 +365,15 @@ def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid,
             _pose_ok = bool(wp.get("ok")) and wp.get("sampled", 0) > 0
             verify_report["pose_verified"] = _pose_ok
             verify_report["level"] = "world-pose" if _pose_ok else "persistence-only"
+    cal_block = {
+        "baseline_focal_mm": baseline, "sensor_width_mm": sensor_w,
+        "baseline_source": cal_result["baseline_source"],
+        "sensor_source": cal_result["sensor_source"],
+        "vc_optics": vc_optics,
+    }
     return "convert", {"written": written, "frames": len(keys), "layer_uid": layer_uid,
                        "vc_uid": vc_uid, "target_setup": setup, "verify": verify_report,
                        "warnings": warnings, "aspect_source": aspect_source,
+                       "calibration": cal_block,
                        "fov_deg": f0.fov_h_deg, "render_aspect": render_aspect,
                        "sensor_width_mm": f0.sensor_width_mm, "focal_mm": f0.focal_mm}

@@ -1,3 +1,5 @@
+import json
+
 import vcam_bridge.cli.main as m
 from vcam_bridge.designer.codegen import INJECT_BODY, build_inject_script
 from vcam_bridge.designer.inject import inject_keys
@@ -7,6 +9,9 @@ from vcam_bridge.designer.client import DesignerClient
 
 def _ok(rv):
     return {"status": {"code": 0}, "d3Log": "", "pythonLog": "", "returnValue": rv}
+
+
+_VC_OPTICS = _ok(json.dumps({"focal_mm": 22.97, "zoom_scale": 1.0, "sensor_w_mm": 35.0, "is_virtual": True}))
 
 
 def test_inject_body_has_guarded_overwrite_strip():
@@ -58,7 +63,8 @@ def test_convert_live_reuses_passed_client_no_reroute(sample_track_csv, monkeypa
     from vcam_bridge.designer.client import DesignerClient
     ft = FakeTransport(
         json_responses={"/api/session/status/session": {"isRunningSolo": True}},
-        execute_responses=[_ok('{"aspect": 1.7777777778}'),
+        execute_responses=[_VC_OPTICS,
+                           _ok('{"aspect": 1.7777777778}'),
                            _ok('{"ok": true, "vc_found": true, "note": []}'),
                            _ok('{"ok": true, "written": 18}')])
     pre = DesignerClient(ft, "localhost")

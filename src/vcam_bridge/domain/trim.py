@@ -74,6 +74,33 @@ def trim_hold(track: CameraTrack) -> tuple[CameraTrack, dict]:
     )
 
 
+def decimate(track: CameraTrack, factor: int) -> tuple[CameraTrack, dict]:
+    """Keep every Nth frame, always preserving first and last.
+
+    Unlike trim/range, the original t_sec values are preserved so that
+    keyframes land at their correct time positions on the Designer timeline;
+    Designer interpolates between the surviving keyframes.
+    """
+    from vcam_bridge.domain.errors import ConfigError
+    if factor < 1:
+        raise ConfigError("--decimate must be >= 1", details={"value": factor})
+    frames = track.frames
+    if factor <= 1 or len(frames) <= 2:
+        return track, {"decimated": False, "factor": factor}
+
+    selected = list(range(0, len(frames), factor))
+    if selected[-1] != len(frames) - 1:
+        selected.append(len(frames) - 1)
+
+    new_frames = [frames[i].model_copy(update={"idx": j})
+                  for j, i in enumerate(selected)]
+    return (
+        CameraTrack(fps=track.fps, camera=track.camera, frames=new_frames),
+        {"decimated": True, "factor": factor,
+         "orig_count": len(frames), "new_count": len(new_frames)},
+    )
+
+
 def trim_range(track: CameraTrack, *, start_frame: int | None = None,
                end_frame: int | None = None) -> tuple[CameraTrack, dict]:
     """Keep only frames in [start_frame, end_frame] (inclusive), re-index from 0."""

@@ -5,11 +5,13 @@ description: >-
   keyframes — including trimming static hold frames and manual frame-range
   selection. Use whenever the user wants to import/inject camera animation into
   Disguise Designer, list ACC layers or virtual cameras, trim or crop FBX
-  animation, remove static/hold frames, calibrate conventions (probe), or
-  mentions FBX + Disguise in any combination. Also trigger for phrases like
-  "put this camera move into Designer", "import FBX", "list cameras in
-  Designer", "check what ACC layers exist", "trim the static part", "cut the
-  hold frames", or "only inject frames 100-300".
+  animation, remove static/hold frames, decimate/subsample keyframes to reduce
+  playback load, calibrate conventions (probe), or mentions FBX + Disguise in
+  any combination. Also trigger for phrases like "put this camera move into
+  Designer", "import FBX", "list cameras in Designer", "check what ACC layers
+  exist", "trim the static part", "cut the hold frames", "only inject frames
+  100-300", "reduce keyframe density", "decimate frames", "subsample", "every
+  other frame", or "drop frame rate for injection".
 ---
 
 # vcam-bridge
@@ -50,7 +52,7 @@ Full boilerplate for copy-paste:
 
 ## Operations
 See `references/contract-manifest.json` (synced from `vcam manifest`). Key ops:
-- `vcam convert --fbx F --target-uid U --vc-uid V [--dry-run] [--trim-hold] [--start-frame N] [--end-frame N]` — inject (destructive).
+- `vcam convert --fbx F --target-uid U --vc-uid V [--dry-run] [--trim-hold] [--start-frame N] [--end-frame N] [--decimate N]` — inject (destructive).
 - `vcam probe --director H:P --probe-layer-uid U` — dump a layer's module type + field names (read-only).
 - `vcam targets list --director H:P` — enumerate ACC layers with coord_mode + n_keys (read-only).
 - `vcam vc list --director H:P` — enumerate cameras with focal_mm/zoom_scale/sensor_mm/parent_uid (read-only).
@@ -94,6 +96,12 @@ vcam convert --fbx /path/to.fbx --target-uid 0x... --dry-run ...
 ```
 > `--dry-run` does not require `--director` when using `--target-uid`. But if
 > using `--target-name` instead, `--director` is needed for name resolution.
+>
+> **Keyframe decimation** — if the user asks to reduce keyframe density (e.g.
+> "every other frame", "reduce frame rate", "decimate"), add `--decimate N`
+> (N=2 keeps every 2nd frame, N=3 every 3rd, etc.). First and last frames are
+> always preserved. Do NOT add `--decimate` unless the user explicitly requests
+> it — full frame density is the default and usually correct.
 Extract summary from `data.dry_run_plan` and present as a compact table:
 - `frame_count`, `fps`, `fov_control`
 - First and last keyframe (position, rotation, zoom)
@@ -122,7 +130,8 @@ Read `data.dry_run_plan.trim` — the report has a consistent shape:
     "trailing_removed": 2,
     "leading_hold_sec": 5.7,
     "trailing_hold_sec": 0.067
-  }
+  },
+  "decimate": null
 }
 ```
 
@@ -143,7 +152,7 @@ When both are used, `data.dry_run_plan.trim` has both `range` and `hold` populat
 vcam convert --fbx /path/to.fbx \
   --target-uid 0x... --vc-uid 0x... \
   --director HOST:PORT \
-  --yes --verify [--trim-hold] [--start-frame N --end-frame N] ...
+  --yes --verify [--trim-hold] [--start-frame N --end-frame N] [--decimate N] ...
 ```
 
 > **Trim flags carry over from dry-run.** If `--trim-hold` or
@@ -221,6 +230,7 @@ Pivot/rotation/distance mapping is identical for both. What differs:
 | `--trim-hold` | Auto-remove leading/trailing static hold frames (each end keeps 1 anchor frame); suggest when dry-run shows >10% static frames |
 | `--start-frame N` | Manual trim: keep frames starting from idx N (0-based, inclusive) |
 | `--end-frame N` | Manual trim: keep frames up to idx N (0-based, inclusive) |
+| `--decimate N` | Keep every Nth frame (2=half, 3=third, etc.); first+last always kept. Only use when user explicitly asks to reduce keyframe density for playback performance. Do NOT suggest proactively |
 | `--overwrite` | Clear existing keyframes before inject (switching takes **or cameras**; see Step 3 note) |
 | `--chunk-size N` | Reduce from default 200 if Designer times out on long animations |
 | `--pivot-distance focus` | Use FBX focus distance as orbit pivot distance |

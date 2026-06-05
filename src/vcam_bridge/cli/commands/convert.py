@@ -287,23 +287,29 @@ def build_keyframes(track, config: Config, *,
     return field_map, keys, keyframes
 
 
-def _apply_trim(track, *, trim_hold_flag=False, start_frame=None, end_frame=None):
+def _apply_trim(track, *, trim_hold_flag=False, start_frame=None, end_frame=None,
+                decimate_factor=None):
     orig_count = len(track.frames)
     range_report = None
     hold_report = None
+    decimate_report = None
     if start_frame is not None or end_frame is not None:
         from vcam_bridge.domain.trim import trim_range
         track, range_report = trim_range(track, start_frame=start_frame, end_frame=end_frame)
     if trim_hold_flag:
         from vcam_bridge.domain.trim import trim_hold
         track, hold_report = trim_hold(track)
-    if range_report is None and hold_report is None:
+    if decimate_factor is not None and decimate_factor > 1:
+        from vcam_bridge.domain.trim import decimate
+        track, decimate_report = decimate(track, decimate_factor)
+    if range_report is None and hold_report is None and decimate_report is None:
         return track, None
     return track, {
         "orig_count": orig_count,
         "new_count": len(track.frames),
         "range": range_report,
         "hold": hold_report,
+        "decimate": decimate_report,
     }
 
 
@@ -312,12 +318,14 @@ def convert_dry_run(fbx_or_intermediate: str, *, config: Config,
                     pivot_distance_const: float | None = None,
                     trim_hold_flag: bool = False,
                     start_frame: int | None = None,
-                    end_frame: int | None = None) -> tuple[str, Any]:
+                    end_frame: int | None = None,
+                    decimate_factor: int | None = None) -> tuple[str, Any]:
     cal = config.calibration
     track = _load_track(fbx_or_intermediate, euler_order=cal.euler_order,
                         blender_path=getattr(config, "blender_path", None))
     track, trim_report = _apply_trim(track, trim_hold_flag=trim_hold_flag,
-                                     start_frame=start_frame, end_frame=end_frame)
+                                     start_frame=start_frame, end_frame=end_frame,
+                                     decimate_factor=decimate_factor)
     field_map, keys, keyframes = build_keyframes(track, config,
                                                  pivot_distance_const=pivot_distance_const)
 
@@ -352,7 +360,8 @@ def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid,
                  pivot_distance_const=None, start_offset_sec=0.0, chunk_size=None,
                  overwrite=False, verify=False, tol_pos=0.001, tol_rot=0.05, tol_zoom=0.05,
                  client=None,
-                 trim_hold_flag=False, start_frame=None, end_frame=None):
+                 trim_hold_flag=False, start_frame=None, end_frame=None,
+                 decimate_factor=None):
     from vcam_bridge.designer.client import DesignerClient
     from vcam_bridge.designer.inject import inject_keys
     from vcam_bridge.designer.codegen import validate_uid
@@ -365,7 +374,8 @@ def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid,
     cal = config.calibration
     track = _load_track(fbx, euler_order=cal.euler_order, blender_path=getattr(config, "blender_path", None))
     track, trim_report = _apply_trim(track, trim_hold_flag=trim_hold_flag,
-                                     start_frame=start_frame, end_frame=end_frame)
+                                     start_frame=start_frame, end_frame=end_frame,
+                                     decimate_factor=decimate_factor)
     if client is None:
         client = DesignerClient(transport, host)
         client.resolve_routing()

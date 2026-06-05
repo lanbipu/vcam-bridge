@@ -53,6 +53,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="手动裁剪：起始帧 idx（含，0-based）")
     p_conv.add_argument("--end-frame", type=int, default=None,
                         help="手动裁剪：结束帧 idx（含，0-based）")
+    p_conv.add_argument("--decimate", type=int, default=None,
+                        help="关键帧抽帧倍率：2=每隔1帧取1帧，3=每隔2帧取1帧，以此类推（首尾帧始终保留）")
     p_conv.add_argument("--tol-pos", type=float, default=0.001)
     p_conv.add_argument("--tol-rot", type=float, default=0.05)
     p_conv.add_argument("--tol-zoom", type=float, default=0.05)
@@ -183,7 +185,8 @@ def _dispatch(args: argparse.Namespace) -> tuple[str, Any]:
             layer_uid = resolve_layer_uid(list_acc_layers(_resolve_client()), args.target_name)
 
         trim_kw = {"trim_hold_flag": args.trim_hold,
-                   "start_frame": args.start_frame, "end_frame": args.end_frame}
+                   "start_frame": args.start_frame, "end_frame": args.end_frame,
+                   "decimate_factor": args.decimate}
 
         if args.dry_run:
             return convert_cmd.convert_dry_run(args.fbx, config=cfg, layer_uid=layer_uid,

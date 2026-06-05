@@ -53,7 +53,7 @@ try:
         if n_before > 1:
             cs.sequence.stripToFirstKey()   # 仅多键(异常情形)才清，避免抹掉单键常态
         cs.disableSequencing = True
-        cs.sequence.setFloat(layer.tStart, 0.0)   # 强制 Global=0（设计硬要求）
+        cs.sequence.setFloat(layer.tStart, 1.0)   # 强制 Global=1（实测 1=Global / 0=Relative：coord=1 时 VC.world==注入坐标；旧值 0.0=Relative 是 bug）
         note.append("coord-global-set")
         if n_before > 1:
             note.append("coord-keys-collapsed:%%d" %% n_before)

@@ -16,6 +16,13 @@ def test_coord_strip_guarded_by_keycount():
     assert "coord-keys-collapsed" in s
 
 
+def test_coord_set_to_global_is_1():
+    # 实测 1=Global / 0=Relative（coord=1 时 VC.world==注入坐标）；旧代码 setFloat 0.0=Relative 是 bug
+    s = _SET_TARGET_SCRIPT
+    assert "setFloat(layer.tStart, 1.0)" in s
+    assert "setFloat(layer.tStart, 0.0)" not in s
+
+
 def test_convert_live_reports_aspect_source_live(sample_track_csv):
     ft = FakeTransport(
         json_responses={"/api/session/status/session": {"isRunningSolo": True}},

@@ -14,7 +14,7 @@
 | 7         | EXIT_TIMEOUT           | `TIMEOUT`                     | **true**  | Designer Python execution timed out |
 | 8         | EXIT_EXTERNAL          | `EXTERNAL_DEPENDENCY`         | **true**  | HTTP / network / Designer unreachable |
 | 9         | EXIT_PARTIAL           | `PARTIAL_FAILURE`             | **true**  | Some chunks injected, some failed |
-| 10        | EXIT_PROBE_FAILED      | `PROBE_FAILED`                | false     | Probe calibration step failed |
+| 10        | EXIT_PROBE_FAILED      | `PROBE_FAILED`                | false     | Probe operation failed (probe is **read-only** — dumps module type + field names) |
 | 11        | EXIT_VERIFY_TOLERANCE  | `VERIFY_TOLERANCE_EXCEEDED`   | false     | --verify readback exceeded tolerance |
 | 12        | EXIT_CONVENTION_LOCK   | `CONVENTION_LOCK_FAILED`      | false     | Cannot determine forward-axis/euler-order |
 | 13        | EXIT_INVALID_FBX       | `INVALID_FBX`                 | false     | FBX file missing, unreadable, or has no camera |

@@ -90,9 +90,27 @@ is_virtual = "Virtual" in cls
 info = {"focal_mm": float(vc.focalLengthMM), "sensor_w_mm": float(vc.sensorSizeMM.x), "is_virtual": is_virtual}
 if is_virtual:
     info["zoom_scale"] = float(vc.zoomScale)
+    info["lens_source"] = int(vc.lensSource)
 else:
     info["zoom_scale"] = None
+    info["lens_source"] = None
 return json.dumps(info)
+'''
+
+
+_LENS_SOURCE_NAMES = {0: "Local intrinsics", 1: "Zoom from parent", 2: "Intrinsics from parent"}
+
+_SET_LENS_SOURCE_SCRIPT = '''
+import json
+vc = None
+for cam in state.stage.cameras:
+    if cam.uid == int(%(vc)r, 16):
+        vc = cam
+        break
+if vc is None:
+    return json.dumps({"ok": False, "error": "vc not found"})
+vc.lensSource = 0
+return json.dumps({"ok": True})
 '''
 
 
@@ -104,6 +122,26 @@ def _read_vc_optics(client, vc_uid: str) -> dict | None:
         return rv
     except Exception:
         return None
+
+
+def _ensure_lens_source_local(client, vc_uid: str, vc_optics: dict | None) -> dict | None:
+    """If the VC lens source is not Local (0), force it to Local and return a
+    change record.  Returns None if already Local or not a VirtualCamera."""
+    if vc_optics is None or not vc_optics.get("is_virtual"):
+        return None
+    current = vc_optics.get("lens_source")
+    if current is None or current == 0:
+        return None
+    from_name = _LENS_SOURCE_NAMES.get(current, str(current))
+    try:
+        result = client.execute(_SET_LENS_SOURCE_SCRIPT % {"vc": vc_uid}).return_value or {}
+    except Exception as exc:
+        return {"changed": False, "error": str(exc), "from": current, "from_name": from_name}
+    if not result.get("ok"):
+        return {"changed": False, "error": result.get("error", "unknown"),
+                "from": current, "from_name": from_name}
+    return {"changed": True, "from": current, "from_name": from_name,
+            "to": 0, "to_name": "Local intrinsics"}
 
 
 def _resolve_calibration(cfg: Config, vc_optics: dict | None) -> dict:
@@ -303,6 +341,7 @@ def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid,
         client = DesignerClient(transport, host)
         client.resolve_routing()
     vc_optics = _read_vc_optics(client, vc_uid)
+    lens_source_change = _ensure_lens_source_local(client, vc_uid, vc_optics)
     render_aspect = _read_camera_aspect(client, vc_uid)
     aspect_source = "live" if render_aspect is not None else "config-fallback"
     cal_result = _resolve_calibration(config, vc_optics)
@@ -318,8 +357,15 @@ def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid,
         raise PartialError("--vc-uid %s not found among stage cameras; ACC layer has no camera bound" % vc_uid,
                            details=setup)
     warnings = []
+    if lens_source_change is not None:
+        if lens_source_change.get("changed"):
+            warnings.append("VC lens source changed: %s -> %s (required for FOV injection via view angle)"
+                            % (lens_source_change["from_name"], lens_source_change["to_name"]))
+        else:
+            warnings.append("VC lens source is '%s' (not Local) but failed to change: %s; FOV may not render correctly"
+                            % (lens_source_change.get("from_name", "?"), lens_source_change.get("error", "unknown")))
     if cal_result["baseline_source"] == "default" and vc_optics is None:
-        warnings.append("VC optics not read; baseline/sensor use config defaults (FOV may drift if VC lens differs)")
+        warnings.append("VC optics not read; baseline/sensor use config defaults, lens source unchecked (FOV may drift if VC lens differs or is non-Local)")
     if render_aspect is None:
         warnings.append("render aspect not read from camera; FOV uses config aspect %.4f (wrong on non-16:9 output)"
                         % cal.aspect)
@@ -370,6 +416,7 @@ def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid,
         "baseline_source": cal_result["baseline_source"],
         "sensor_source": cal_result["sensor_source"],
         "vc_optics": vc_optics,
+        "lens_source_change": lens_source_change,
     }
     return "convert", {"written": written, "frames": len(keys), "layer_uid": layer_uid,
                        "vc_uid": vc_uid, "target_setup": setup, "verify": verify_report,

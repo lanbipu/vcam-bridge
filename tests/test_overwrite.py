@@ -11,7 +11,7 @@ def _ok(rv):
     return {"status": {"code": 0}, "d3Log": "", "pythonLog": "", "returnValue": rv}
 
 
-_VC_OPTICS = _ok(json.dumps({"focal_mm": 22.97, "zoom_scale": 1.0, "sensor_w_mm": 35.0, "is_virtual": True}))
+_VC_OPTICS = _ok(json.dumps({"focal_mm": 22.97, "zoom_scale": 1.0, "sensor_w_mm": 35.0, "is_virtual": True, "lens_source": 0}))
 
 
 def test_inject_body_has_guarded_overwrite_strip():

@@ -23,6 +23,12 @@ except ImportError:
     def _resolve_calibration(cfg, vc_optics):
         raise NotImplementedError("_resolve_calibration not yet implemented")
 
+try:
+    from vcam_bridge.cli.commands.convert import _ensure_lens_source_local
+except ImportError:
+    def _ensure_lens_source_local(client, vc_uid, vc_optics):
+        raise NotImplementedError("_ensure_lens_source_local not yet implemented")
+
 
 def _ok(rv):
     return {"status": {"code": 0}, "d3Log": "", "pythonLog": "", "returnValue": rv}
@@ -37,7 +43,7 @@ class TestReadVcOptics:
         ft = FakeTransport(execute_responses=[
             _ok(json.dumps({
                 "focal_mm": 22.96875, "zoom_scale": 1.0,
-                "sensor_w_mm": 35.0, "is_virtual": True,
+                "sensor_w_mm": 35.0, "is_virtual": True, "lens_source": 0,
             }))])
         from vcam_bridge.designer.client import DesignerClient
         client = DesignerClient(ft, "localhost")
@@ -47,6 +53,7 @@ class TestReadVcOptics:
         assert optics["zoom_scale"] == pytest.approx(1.0)
         assert optics["sensor_w_mm"] == pytest.approx(35.0)
         assert optics["is_virtual"] is True
+        assert optics["lens_source"] == 0
 
     def test_returns_none_on_execute_failure(self):
         ft = FakeTransport(execute_responses=[
@@ -59,7 +66,7 @@ class TestReadVcOptics:
         ft = FakeTransport(execute_responses=[
             _ok(json.dumps({
                 "focal_mm": 22.7, "zoom_scale": None,
-                "sensor_w_mm": 35.0, "is_virtual": False,
+                "sensor_w_mm": 35.0, "is_virtual": False, "lens_source": None,
             }))])
         from vcam_bridge.designer.client import DesignerClient
         client = DesignerClient(ft, "localhost")
@@ -67,6 +74,7 @@ class TestReadVcOptics:
         assert optics is not None
         assert optics["is_virtual"] is False
         assert optics["zoom_scale"] is None
+        assert optics["lens_source"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -196,7 +204,58 @@ class TestCalibrationPriority:
 
 
 # ---------------------------------------------------------------------------
-# 5. convert_live integration: auto-calibration end-to-end
+# 5. _ensure_lens_source_local: force VC lens source to Local
+# ---------------------------------------------------------------------------
+
+class TestEnsureLensSourceLocal:
+    def test_already_local_returns_none(self):
+        optics = {"is_virtual": True, "lens_source": 0}
+        assert _ensure_lens_source_local(None, "0xabc", optics) is None
+
+    def test_none_optics_returns_none(self):
+        assert _ensure_lens_source_local(None, "0xabc", None) is None
+
+    def test_live_camera_returns_none(self):
+        optics = {"is_virtual": False, "lens_source": None}
+        assert _ensure_lens_source_local(None, "0xabc", optics) is None
+
+    def test_follow_parent_zoom_triggers_change(self):
+        ft = FakeTransport(execute_responses=[_ok('{"ok": true}')])
+        from vcam_bridge.designer.client import DesignerClient
+        client = DesignerClient(ft, "localhost")
+        optics = {"is_virtual": True, "lens_source": 1}
+        result = _ensure_lens_source_local(client, "0xabc", optics)
+        assert result is not None
+        assert result["changed"] is True
+        assert result["from"] == 1
+        assert result["from_name"] == "Zoom from parent"
+        assert result["to"] == 0
+
+    def test_follow_all_intrinsics_triggers_change(self):
+        ft = FakeTransport(execute_responses=[_ok('{"ok": true}')])
+        from vcam_bridge.designer.client import DesignerClient
+        client = DesignerClient(ft, "localhost")
+        optics = {"is_virtual": True, "lens_source": 2}
+        result = _ensure_lens_source_local(client, "0xabc", optics)
+        assert result is not None
+        assert result["changed"] is True
+        assert result["from"] == 2
+        assert result["from_name"] == "Intrinsics from parent"
+
+    def test_set_fails_reports_error(self):
+        ft = FakeTransport(execute_responses=[
+            _ok('{"ok": false, "error": "permission denied"}')])
+        from vcam_bridge.designer.client import DesignerClient
+        client = DesignerClient(ft, "localhost")
+        optics = {"is_virtual": True, "lens_source": 1}
+        result = _ensure_lens_source_local(client, "0xabc", optics)
+        assert result is not None
+        assert result["changed"] is False
+        assert "permission denied" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# 6. convert_live integration: auto-calibration end-to-end
 # ---------------------------------------------------------------------------
 
 class TestConvertLiveAutoCal:
@@ -204,9 +263,9 @@ class TestConvertLiveAutoCal:
         ft = FakeTransport(
             json_responses={"/api/session/status/session": {"isRunningSolo": True}},
             execute_responses=[
-                # _read_vc_optics
+                # _read_vc_optics (lens_source=0 -> already Local, no set call)
                 _ok(json.dumps({"focal_mm": 22.96875, "zoom_scale": 1.0,
-                                "sensor_w_mm": 35.0, "is_virtual": True})),
+                                "sensor_w_mm": 35.0, "is_virtual": True, "lens_source": 0})),
                 # _read_camera_aspect
                 _ok('{"aspect": 1.7777777778}'),
                 # _SET_TARGET_SCRIPT
@@ -225,6 +284,7 @@ class TestConvertLiveAutoCal:
         assert cal["baseline_source"] == "vc-auto"
         assert cal["sensor_source"] == "vc-auto"
         assert cal["vc_optics"]["focal_mm"] == pytest.approx(22.96875)
+        assert cal["lens_source_change"] is None
 
     def test_convert_live_warns_on_optics_failure(self, sample_track_csv):
         ft = FakeTransport(
@@ -248,9 +308,37 @@ class TestConvertLiveAutoCal:
         assert any("baseline" in w.lower() or "optics" in w.lower()
                     for w in data["warnings"])
 
+    def test_convert_live_changes_lens_source_to_local(self, sample_track_csv):
+        ft = FakeTransport(
+            json_responses={"/api/session/status/session": {"isRunningSolo": True}},
+            execute_responses=[
+                # _read_vc_optics (lens_source=1 -> Zoom from parent)
+                _ok(json.dumps({"focal_mm": 22.96875, "zoom_scale": 1.0,
+                                "sensor_w_mm": 35.0, "is_virtual": True, "lens_source": 1})),
+                # _ensure_lens_source_local -> _SET_LENS_SOURCE_SCRIPT
+                _ok('{"ok": true}'),
+                # _read_camera_aspect
+                _ok('{"aspect": 1.7777777778}'),
+                # _SET_TARGET_SCRIPT
+                _ok('{"ok": true, "note": []}'),
+                # inject chunk
+                _ok('{"ok": true, "written": 18}'),
+            ],
+        )
+        from vcam_bridge.config import load_config
+        op, data = convert_live(ft, host="localhost", fbx=str(sample_track_csv),
+                                config=load_config(None), layer_uid="0xabc",
+                                vc_uid="0xdef", chunk_size=100)
+        change = data["calibration"]["lens_source_change"]
+        assert change is not None
+        assert change["changed"] is True
+        assert change["from"] == 1
+        assert change["to"] == 0
+        assert any("lens source" in w.lower() for w in data["warnings"])
+
 
 # ---------------------------------------------------------------------------
-# 6. P2 fix: dry-run notes that zoom will be auto-calibrated live
+# 7. P2 fix: dry-run notes that zoom will be auto-calibrated live
 # ---------------------------------------------------------------------------
 
 class TestDryRunAutocalNote:

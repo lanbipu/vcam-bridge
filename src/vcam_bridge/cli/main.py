@@ -47,6 +47,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_conv.add_argument("--overwrite", action="store_true", default=False,
                         help="注入前清掉目标层动画字段的旧键（换不同长度/起点的 take 时避免残帧；同 take 重跑天然幂等，无需此项）")
     p_conv.add_argument("--verify", action="store_true", default=False)
+    p_conv.add_argument("--trim-hold", action="store_true", default=False,
+                        help="自动去除首尾静止 hold 帧（每端保留 1 帧锚点）")
+    p_conv.add_argument("--start-frame", type=int, default=None,
+                        help="手动裁剪：起始帧 idx（含，0-based）")
+    p_conv.add_argument("--end-frame", type=int, default=None,
+                        help="手动裁剪：结束帧 idx（含，0-based）")
     p_conv.add_argument("--tol-pos", type=float, default=0.001)
     p_conv.add_argument("--tol-rot", type=float, default=0.05)
     p_conv.add_argument("--tol-zoom", type=float, default=0.05)
@@ -176,9 +182,13 @@ def _dispatch(args: argparse.Namespace) -> tuple[str, Any]:
                 raise ConfigError("one of --target-uid / --target-name is required")
             layer_uid = resolve_layer_uid(list_acc_layers(_resolve_client()), args.target_name)
 
+        trim_kw = {"trim_hold_flag": args.trim_hold,
+                   "start_frame": args.start_frame, "end_frame": args.end_frame}
+
         if args.dry_run:
             return convert_cmd.convert_dry_run(args.fbx, config=cfg, layer_uid=layer_uid,
-                                               overwrite=args.overwrite, pivot_distance_const=const)
+                                               overwrite=args.overwrite, pivot_distance_const=const,
+                                               **trim_kw)
 
         # Live injection path — camera 解析推迟到这里（dry-run 不消费 vc_uid，不该被 --camera-name 逼连 director）。
         if not args.yes:
@@ -208,6 +218,7 @@ def _dispatch(args: argparse.Namespace) -> tuple[str, Any]:
             tol_pos=args.tol_pos,
             tol_rot=args.tol_rot,
             tol_zoom=args.tol_zoom,
+            **trim_kw,
         )
 
     raise VcamError("no command given")

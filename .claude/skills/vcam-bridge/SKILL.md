@@ -2,11 +2,14 @@
 name: vcam-bridge
 description: >-
   Convert UE Sequencer FBX camera animation into Disguise AnimateCameraControl
-  keyframes. Use whenever the user wants to import/inject camera animation into
-  Disguise Designer, list ACC layers or virtual cameras, calibrate conventions
-  (probe), or mentions FBX + Disguise in any combination. Also trigger for
-  phrases like "put this camera move into Designer", "import FBX", "list
-  cameras in Designer", or "check what ACC layers exist".
+  keyframes — including trimming static hold frames and manual frame-range
+  selection. Use whenever the user wants to import/inject camera animation into
+  Disguise Designer, list ACC layers or virtual cameras, trim or crop FBX
+  animation, remove static/hold frames, calibrate conventions (probe), or
+  mentions FBX + Disguise in any combination. Also trigger for phrases like
+  "put this camera move into Designer", "import FBX", "list cameras in
+  Designer", "check what ACC layers exist", "trim the static part", "cut the
+  hold frames", or "only inject frames 100-300".
 ---
 
 # vcam-bridge
@@ -47,7 +50,7 @@ Full boilerplate for copy-paste:
 
 ## Operations
 See `references/contract-manifest.json` (synced from `vcam manifest`). Key ops:
-- `vcam convert --fbx F --target-uid U --vc-uid V [--dry-run]` — inject (destructive).
+- `vcam convert --fbx F --target-uid U --vc-uid V [--dry-run] [--trim-hold] [--start-frame N] [--end-frame N]` — inject (destructive).
 - `vcam probe --director H:P --probe-layer-uid U` — dump a layer's module type + field names (read-only).
 - `vcam targets list --director H:P` — enumerate ACC layers with coord_mode + n_keys (read-only).
 - `vcam vc list --director H:P` — enumerate cameras with focal_mm/zoom_scale/sensor_mm/parent_uid (read-only).
@@ -89,6 +92,8 @@ note `focal_mm` and `zoom_scale` — these are needed for baseline calibration.
 ```bash
 vcam convert --fbx /path/to.fbx --target-uid 0x... --dry-run ...
 ```
+> `--dry-run` does not require `--director` when using `--target-uid`. But if
+> using `--target-name` instead, `--director` is needed for name resolution.
 Extract summary from `data.dry_run_plan` and present as a compact table:
 - `frame_count`, `fps`, `fov_control`
 - First and last keyframe (position, rotation, zoom)
@@ -96,13 +101,55 @@ Extract summary from `data.dry_run_plan` and present as a compact table:
 
 Do NOT dump the full keyframe array (can be 90KB+ even for short clips).
 
+#### Static hold analysis
+
+To check for static hold frames, re-run the dry-run with `--trim-hold`:
+```bash
+vcam convert --fbx /path/to.fbx --target-uid 0x... --trim-hold --dry-run ...
+```
+
+Read `data.dry_run_plan.trim` — the report has a consistent shape:
+```json
+{
+  "orig_count": 324,
+  "new_count": 151,
+  "range": null,
+  "hold": {
+    "trimmed": true,
+    "orig_count": 324,
+    "new_count": 151,
+    "leading_removed": 171,
+    "trailing_removed": 2,
+    "leading_hold_sec": 5.7,
+    "trailing_hold_sec": 0.067
+  }
+}
+```
+
+If `hold.leading_removed` or `hold.trailing_removed` > 0, present the finding:
+```
+Detected: 171 leading + 2 trailing static hold frames removed (324 → 151, saves 5.77s).
+```
+
+Do NOT scan the keyframes array yourself — the CLI's hold detection uses
+calibrated thresholds on the raw transform matrix; manual comparison may disagree.
+
+For precise manual control, suggest `--start-frame N --end-frame N` instead.
+Both flags can be combined: range is applied first, then hold-trim on the result.
+When both are used, `data.dry_run_plan.trim` has both `range` and `hold` populated.
+
 ### Step 3 — Live inject (destructive, requires `--yes`)
 ```bash
 vcam convert --fbx /path/to.fbx \
   --target-uid 0x... --vc-uid 0x... \
   --director HOST:PORT \
-  --yes --verify ...
+  --yes --verify [--trim-hold] [--start-frame N --end-frame N] ...
 ```
+
+> **Trim flags carry over from dry-run.** If `--trim-hold` or
+> `--start-frame`/`--end-frame` was used in the Step 2 dry-run, include the
+> same flags in the live inject command so the injected keyframes match the
+> previewed count.
 
 > **Switching takes or cameras? Add `--overwrite`.** By default new keys are
 > *appended* onto whatever is already on the layer — stale residual keys remain
@@ -126,6 +173,7 @@ After a successful inject, parse the envelope and present this summary:
 | Status            | data.target_setup.ok           |
 | Written keys      | data.written                   |
 | Frames            | data.frames (fps, duration)    |
+| Trim              | data.trim.{orig_count, new_count, hold.leading_removed, hold.trailing_removed} (if used) |
 | Camera bound      | data.target_setup.note[]       |
 | Lens source       | data.calibration.lens_source_change |
 | Verify            | data.verify.ok / .level        |
@@ -170,6 +218,9 @@ Pivot/rotation/distance mapping is identical for both. What differs:
 |------|-------------|
 | `--target-name "Name"` | Instead of `--target-uid` (exact match, requires `--director`) |
 | `--camera-name "Name"` | Instead of `--vc-uid` (exact match, requires `--director`) |
+| `--trim-hold` | Auto-remove leading/trailing static hold frames (each end keeps 1 anchor frame); suggest when dry-run shows >10% static frames |
+| `--start-frame N` | Manual trim: keep frames starting from idx N (0-based, inclusive) |
+| `--end-frame N` | Manual trim: keep frames up to idx N (0-based, inclusive) |
 | `--overwrite` | Clear existing keyframes before inject (switching takes **or cameras**; see Step 3 note) |
 | `--chunk-size N` | Reduce from default 200 if Designer times out on long animations |
 | `--pivot-distance focus` | Use FBX focus distance as orbit pivot distance |

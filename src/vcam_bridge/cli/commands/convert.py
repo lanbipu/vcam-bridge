@@ -287,12 +287,37 @@ def build_keyframes(track, config: Config, *,
     return field_map, keys, keyframes
 
 
+def _apply_trim(track, *, trim_hold_flag=False, start_frame=None, end_frame=None):
+    orig_count = len(track.frames)
+    range_report = None
+    hold_report = None
+    if start_frame is not None or end_frame is not None:
+        from vcam_bridge.domain.trim import trim_range
+        track, range_report = trim_range(track, start_frame=start_frame, end_frame=end_frame)
+    if trim_hold_flag:
+        from vcam_bridge.domain.trim import trim_hold
+        track, hold_report = trim_hold(track)
+    if range_report is None and hold_report is None:
+        return track, None
+    return track, {
+        "orig_count": orig_count,
+        "new_count": len(track.frames),
+        "range": range_report,
+        "hold": hold_report,
+    }
+
+
 def convert_dry_run(fbx_or_intermediate: str, *, config: Config,
                     layer_uid: str, overwrite: bool = False,
-                    pivot_distance_const: float | None = None) -> tuple[str, Any]:
+                    pivot_distance_const: float | None = None,
+                    trim_hold_flag: bool = False,
+                    start_frame: int | None = None,
+                    end_frame: int | None = None) -> tuple[str, Any]:
     cal = config.calibration
     track = _load_track(fbx_or_intermediate, euler_order=cal.euler_order,
                         blender_path=getattr(config, "blender_path", None))
+    track, trim_report = _apply_trim(track, trim_hold_flag=trim_hold_flag,
+                                     start_frame=start_frame, end_frame=end_frame)
     field_map, keys, keyframes = build_keyframes(track, config,
                                                  pivot_distance_const=pivot_distance_const)
 
@@ -308,6 +333,7 @@ def convert_dry_run(fbx_or_intermediate: str, *, config: Config,
             "fps": track.fps,
             "fov_control": "view_angle+zoom",
             "keyframes": keyframes,
+            "trim": trim_report,
             "aspect_source": "config-default",
             "baseline_source": "config-default",
             "sensor_width_mm": f0.sensor_width_mm if f0 else None,
@@ -325,7 +351,8 @@ def convert_dry_run(fbx_or_intermediate: str, *, config: Config,
 def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid,
                  pivot_distance_const=None, start_offset_sec=0.0, chunk_size=None,
                  overwrite=False, verify=False, tol_pos=0.001, tol_rot=0.05, tol_zoom=0.05,
-                 client=None):
+                 client=None,
+                 trim_hold_flag=False, start_frame=None, end_frame=None):
     from vcam_bridge.designer.client import DesignerClient
     from vcam_bridge.designer.inject import inject_keys
     from vcam_bridge.designer.codegen import validate_uid
@@ -337,6 +364,8 @@ def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid,
             raise ConfigError("%s must be a 0x-hex uid: %s" % (label, exc), details={"value": u}) from exc
     cal = config.calibration
     track = _load_track(fbx, euler_order=cal.euler_order, blender_path=getattr(config, "blender_path", None))
+    track, trim_report = _apply_trim(track, trim_hold_flag=trim_hold_flag,
+                                     start_frame=start_frame, end_frame=end_frame)
     if client is None:
         client = DesignerClient(transport, host)
         client.resolve_routing()
@@ -421,6 +450,6 @@ def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid,
     return "convert", {"written": written, "frames": len(keys), "layer_uid": layer_uid,
                        "vc_uid": vc_uid, "target_setup": setup, "verify": verify_report,
                        "warnings": warnings, "aspect_source": aspect_source,
-                       "calibration": cal_block,
+                       "calibration": cal_block, "trim": trim_report,
                        "fov_deg": f0.fov_h_deg, "render_aspect": render_aspect,
                        "sensor_width_mm": f0.sensor_width_mm, "focal_mm": f0.focal_mm}

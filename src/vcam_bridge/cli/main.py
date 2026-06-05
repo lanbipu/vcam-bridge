@@ -67,6 +67,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_probe = sub.add_parser("probe", parents=[gp])
     p_probe.add_argument("--probe-layer-uid", required=True)
 
+    # config subcommand with nested init/show/validate
+    p_config = sub.add_parser("config", parents=[gp])
+    config_sub = p_config.add_subparsers(dest="subcommand")
+    p_cfg_init = config_sub.add_parser("init", parents=[gp])
+    p_cfg_init.add_argument("--path", default="vcam.yaml",
+                            help="输出配置文件路径（默认 vcam.yaml）")
+    config_sub.add_parser("show", parents=[gp])
+    p_cfg_val = config_sub.add_parser("validate", parents=[gp])
+    p_cfg_val.add_argument("--path", required=True, help="待验证配置文件路径")
+
     return parser
 
 
@@ -109,6 +119,17 @@ def _dispatch(args: argparse.Namespace) -> tuple[str, Any]:
         from vcam_bridge.cli.commands import probe as probe_cmd
         return probe_cmd.run_probe(_make_transport(args), host=args.director,
                                    probe_layer_uid=args.probe_layer_uid)
+
+    if args.command == "config":
+        from vcam_bridge.cli.commands import config_cmd
+        sc = getattr(args, "subcommand", None)
+        if sc == "init":
+            return config_cmd.config_init(args.path, dry_run=args.dry_run)
+        if sc == "show":
+            return config_cmd.config_show(args.config)
+        if sc == "validate":
+            return config_cmd.config_validate(args.path)
+        raise ConfigError("config subcommand required: init | show | validate")
 
     if args.command == "convert":
         cfg = load_config(args.config)
@@ -201,6 +222,7 @@ def _op_id(args: argparse.Namespace) -> str:
         "probe": "probe",
         "targets": "targets.list",
         "vc": "vc.list",
+        "config": "config.%s" % (getattr(args, "subcommand", None) or "show"),
     }
     return m.get(args.command, "INTERNAL")
 

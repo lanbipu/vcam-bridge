@@ -14,9 +14,12 @@ def _ok(rv):
 
 
 _ROWS = json.dumps([
-    ["0xaa1e1c34ac2ad525", "objects/camera/live cam 1.apx", "live cam 1", "Camera"],
-    ["0x8590ade039a8af4", "objects/camera/live cam 2.apx", "live cam 2", "Camera"],
-    ["0xd3ebbf1e5336711c", "objects/virtualcamera/virtual cam 1.apx", "virtual cam 1", "VirtualCamera"],
+    {"uid": "0xaa1e1c34ac2ad525", "path": "objects/camera/live cam 1.apx", "desc": "live cam 1", "cls": "Camera",
+     "focal_mm": 22.7, "sensor_mm": [35.0, 19.687]},
+    {"uid": "0x8590ade039a8af4", "path": "objects/camera/live cam 2.apx", "desc": "live cam 2", "cls": "Camera",
+     "focal_mm": 15.75, "sensor_mm": [24.0, 13.5]},
+    {"uid": "0xd3ebbf1e5336711c", "path": "objects/virtualcamera/virtual cam 1.apx", "desc": "virtual cam 1", "cls": "VirtualCamera",
+     "focal_mm": 22.97, "zoom_scale": 1.0, "sensor_mm": [35.0, 19.687], "parent_uid": "0xaa1e1c34ac2ad525"},
 ])
 
 
@@ -27,10 +30,16 @@ def _client(rows=_ROWS):
 
 def test_list_cameras_includes_live_and_virtual_with_type():
     c, _ = _client()
-    assert list_cameras(c) == [
-        {"name": "live cam 1", "uid": "0xaa1e1c34ac2ad525", "type": "live"},
-        {"name": "live cam 2", "uid": "0x8590ade039a8af4", "type": "live"},
-        {"name": "virtual cam 1", "uid": "0xd3ebbf1e5336711c", "type": "virtual"}]
+    cams = list_cameras(c)
+    assert len(cams) == 3
+    assert cams[0]["name"] == "live cam 1"
+    assert cams[0]["uid"] == "0xaa1e1c34ac2ad525"
+    assert cams[0]["type"] == "live"
+    assert cams[0]["focal_mm"] == 22.7
+    assert cams[2]["name"] == "virtual cam 1"
+    assert cams[2]["type"] == "virtual"
+    assert cams[2]["zoom_scale"] == 1.0
+    assert cams[2]["parent_uid"] == "0xaa1e1c34ac2ad525"
 
 
 def test_enum_script_never_uses_broken_cam_name():
@@ -50,8 +59,8 @@ def test_resolve_camera_unknown_and_ambiguous():
     with pytest.raises(NotFoundError):
         resolve_camera_uid(cams, "nope")
     dup = list_cameras(_client(json.dumps([
-        ["0xaa", "objects/camera/live cam 1.apx", "live cam 1", "Camera"],
-        ["0x999", "objects/camera/live cam 1.apx", "dup", "Camera"]]))[0])
+        {"uid": "0xaa", "path": "objects/camera/live cam 1.apx", "desc": "live cam 1", "cls": "Camera"},
+        {"uid": "0x999", "path": "objects/camera/live cam 1.apx", "desc": "dup", "cls": "Camera"}]))[0])
     with pytest.raises(ConfigError):
         resolve_camera_uid(dup, "live cam 1")
 
@@ -61,6 +70,9 @@ def test_vc_list_emits_cameras_and_backcompat_alias():
                        json_responses={"/api/session/status/session": {"isRunningSolo": True}})
     op, data = vc_cmd.list_vcams(ft, host="localhost")
     assert op == "vc.list"
-    assert data["cameras"][0] == {"name": "live cam 1", "uid": "0xaa1e1c34ac2ad525", "type": "live"}
-    # 向后兼容：旧 key 保留，含虚拟子集（语义不变）
-    assert data["virtual_cameras"] == [{"name": "virtual cam 1", "uid": "0xd3ebbf1e5336711c", "type": "virtual"}]
+    assert data["cameras"][0]["name"] == "live cam 1"
+    assert data["cameras"][0]["uid"] == "0xaa1e1c34ac2ad525"
+    assert data["cameras"][0]["type"] == "live"
+    assert len(data["virtual_cameras"]) == 1
+    assert data["virtual_cameras"][0]["name"] == "virtual cam 1"
+    assert data["virtual_cameras"][0]["uid"] == "0xd3ebbf1e5336711c"

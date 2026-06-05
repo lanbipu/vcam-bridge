@@ -12,12 +12,17 @@ def _ok(rv):
 
 def test_targets_list_command_returns_layers():
     ft = FakeTransport(
-        execute_responses=[_ok('[["My ACC", "0xabc", "<_blipValue(AnimateCamera) instance at 0x1>"]]')],
+        execute_responses=[_ok(json.dumps([
+            {"name": "My ACC", "uid": "0xabc", "mt": "<_blipValue(AnimateCamera) instance at 0x1>",
+             "coord": 1.0, "n_keys": 450}]))],
         json_responses={"/api/session/status/session": {"isRunningSolo": True}},
     )
     op, data = targets_cmd.list_targets(ft, host="localhost")
     assert op == "targets.list"
-    assert data["layers"] == [{"name": "My ACC", "uid": "0xabc"}]
+    assert data["layers"][0]["name"] == "My ACC"
+    assert data["layers"][0]["uid"] == "0xabc"
+    assert data["layers"][0]["coord_mode"] == "global"
+    assert data["layers"][0]["n_keys"] == 450
 
 
 def test_convert_live_injects(sample_track_csv):
@@ -99,13 +104,17 @@ def test_convert_live_set_target_fail(sample_track_csv):
 def test_vc_list_command():
     from vcam_bridge.cli.commands import vc as vc_cmd
     ft = FakeTransport(
-        execute_responses=[_ok('[["0x99", "objects/virtualcamera/VC1.apx", "VC1", "VirtualCamera"]]')],
+        execute_responses=[_ok(json.dumps([
+            {"uid": "0x99", "path": "objects/virtualcamera/VC1.apx", "desc": "VC1", "cls": "VirtualCamera",
+             "focal_mm": 22.97, "zoom_scale": 1.0, "sensor_mm": [35.0, 19.687]}]))],
         json_responses={"/api/session/status/session": {"isRunningSolo": True}},
     )
     op, data = vc_cmd.list_vcams(ft, host="localhost")
     assert op == "vc.list"
-    assert data["cameras"] == [{"name": "VC1", "uid": "0x99", "type": "virtual"}]
-    assert data["virtual_cameras"] == [{"name": "VC1", "uid": "0x99", "type": "virtual"}]
+    assert data["cameras"][0]["name"] == "VC1"
+    assert data["cameras"][0]["type"] == "virtual"
+    assert data["cameras"][0]["focal_mm"] == 22.97
+    assert data["virtual_cameras"][0]["zoom_scale"] == 1.0
 
 
 def test_probe_command():

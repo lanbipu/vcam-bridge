@@ -48,8 +48,10 @@ Full boilerplate for copy-paste:
 ## Operations
 See `references/contract-manifest.json` (synced from `vcam manifest`). Key ops:
 - `vcam convert --fbx F --target-uid U --vc-uid V [--dry-run]` — inject (destructive).
-- `vcam probe --director H:P --probe-layer-uid U` — dump a layer's module type + field names (**read-only**; despite the name it does NOT write a scratch layer).
-- `vcam targets list --director H:P` / `vcam vc list --director H:P` — enumerate (read-only).
+- `vcam probe --director H:P --probe-layer-uid U` — dump a layer's module type + field names (read-only).
+- `vcam targets list --director H:P` — enumerate ACC layers with coord_mode + n_keys (read-only).
+- `vcam vc list --director H:P` — enumerate cameras with focal_mm/zoom_scale/sensor_mm/parent_uid (read-only).
+- `vcam config init --path P` / `vcam config show` / `vcam config validate --path P` — config management.
 
 ---
 
@@ -75,9 +77,13 @@ remote operations. Resolve it in this priority order:
 vcam targets list --director HOST:PORT ...
 vcam vc list --director HOST:PORT ...
 ```
-Parse `data.layers[].{name, uid}` and `data.cameras[].{name, uid, type}`.
+Parse `data.layers[].{name, uid, coord_mode, n_keys}` and
+`data.cameras[].{name, uid, type, focal_mm, zoom_scale, sensor_mm, parent_uid}`.
+
 Present both lists to user via AskUserQuestion for selection — one question
-for ACC layer, one for camera.
+for ACC layer, one for camera. Include `coord_mode` and `n_keys` in the layer
+descriptions (helps decide whether `--overwrite` is needed). For virtual cameras,
+note `focal_mm` and `zoom_scale` — these are needed for baseline calibration.
 
 ### Step 2 — Dry-run preview (read-only)
 ```bash
@@ -104,8 +110,11 @@ vcam convert --fbx /path/to.fbx \
 > old keys first. Re-running the same FBX on the same layer is idempotent and
 > doesn't need it.
 
-> **Injecting a VirtualCamera?** First calibrate `baseline_focal_mm` (see the
-> "Virtual Camera vs Live Camera" section below) — a wrong baseline shifts the FOV.
+> **Injecting a VirtualCamera?** First calibrate `baseline_focal_mm`:
+> read `focal_mm` and `zoom_scale` from `vcam vc list`, compute the baseline
+> (`focal_mm / zoom_scale` if scale != 1, else `focal_mm` directly), write a
+> config via `vcam config init`, edit the baseline, and pass `--config`.
+> See the "Virtual Camera vs Live Camera" section below for details.
 
 ### Step 4 — Present result
 
@@ -140,8 +149,13 @@ Pivot/rotation/distance mapping is identical for both. What differs:
   expose both fields, so neither errors on a missing field.
 - **VC needs baseline calibration** — `virtual camera zoom = target_focal /
   baseline_focal_mm`. The default `30.296` only fits one specific VC. Before
-  injecting a VirtualCamera, read its zoomScale=1 focal length (`vc.focalLengthMM`
-  when `zoomScale == 1`) and set `calibration.baseline_focal_mm` via `--config`.
+  injecting a VirtualCamera:
+  1. Run `vcam vc list` — the response includes `focal_mm` and `zoom_scale` for each VC.
+  2. If `zoom_scale == 1.0`, that VC's `focal_mm` IS the baseline.
+     If `zoom_scale != 1.0`, compute `baseline = focal_mm / zoom_scale`.
+  3. Create a config file with `calibration.baseline_focal_mm` set to this value
+     (use `vcam config init --path vcam.yaml`, then edit the baseline), and pass
+     `--config vcam.yaml` to `convert`.
   A wrong baseline shifts the whole FOV. Live Cameras don't need this.
 - **Coordinate system is forced to Global** — vcam sets the ACC `virtual camera
   coordinates` field to **1** (=Global; **0 = Relative**). Mandatory: vcam emits

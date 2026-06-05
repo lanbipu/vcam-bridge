@@ -21,12 +21,20 @@ def test_list_tracks_parses_rest():
 def test_list_acc_layers_filters_exact_module():
     # moduleType 是 _blipValue(...) 对象字符串；精确取括号内 module 名 == AnimateCamera，
     # 排除 AnimateCamera2（Preset，子串也含 "AnimateCamera"）和其它 module。
-    rv = ('[["Ctrl", "0xa", "<_blipValue(AnimateCamera) instance at 0x1>"], '
-          '["Preset", "0xb", "<_blipValue(AnimateCamera2) instance at 0x2>"], '
-          '["Vid", "0xc", "<_blipValue(VariableVideoModule) instance at 0x3>"]]')
+    import json
+    rv = json.dumps([
+        {"name": "Ctrl", "uid": "0xa", "mt": "<_blipValue(AnimateCamera) instance at 0x1>", "coord": 1.0, "n_keys": 900},
+        {"name": "Preset", "uid": "0xb", "mt": "<_blipValue(AnimateCamera2) instance at 0x2>"},
+        {"name": "Vid", "uid": "0xc", "mt": "<_blipValue(VariableVideoModule) instance at 0x3>"},
+    ])
     ft = FakeTransport(execute_responses=[_ok(rv)])
     c = DesignerClient(ft, "localhost")
-    assert list_acc_layers(c) == [{"name": "Ctrl", "uid": "0xa"}]   # 仅精确 AnimateCamera
+    layers = list_acc_layers(c)
+    assert len(layers) == 1
+    assert layers[0]["name"] == "Ctrl"
+    assert layers[0]["uid"] == "0xa"
+    assert layers[0]["coord_mode"] == "global"
+    assert layers[0]["n_keys"] == 900
     assert "moduleType" in ft.executed[0]["script"]
 
 

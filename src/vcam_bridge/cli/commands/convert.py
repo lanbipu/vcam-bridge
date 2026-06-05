@@ -201,12 +201,16 @@ def convert_dry_run(fbx_or_intermediate: str, *, config: Config,
                       "fields": field_map, "keys": keys, "overwrite": overwrite}
     inject_script = build_inject_script(inject_payload)
 
+    f0 = track.frames[0] if track.frames else None
     data = {
         "dry_run_plan": {
             "frame_count": len(track.frames),
             "fps": track.fps,
             "fov_control": "view_angle+zoom",
             "keyframes": keyframes,
+            "aspect_source": "config-default",
+            "sensor_width_mm": f0.sensor_width_mm if f0 else None,
+            "focal_mm": f0.focal_mm if f0 else None,
             "note": ("field map names and start_offset_sec are placeholders resolved live in "
                      "Plan 2 (P2 field map; --start-tc/--at-playhead); beats are computed "
                      "in-script via track.timeToBeat"),

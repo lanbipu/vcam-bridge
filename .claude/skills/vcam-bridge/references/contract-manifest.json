@@ -36,7 +36,7 @@
     },
     {
       "operation_id": "probe",
-      "summary": "Calibrate Designer conventions (P0-P9) on a scratch ACC layer",
+      "summary": "Read module type and field names from an ACC layer",
       "input_schema": {
         "$ref": "#/schemas/probe/input"
       },
@@ -47,10 +47,10 @@
         "$ref": "#/schemas/error"
       },
       "side_effects": {
-        "writes": true,
+        "writes": false,
         "external_calls": true,
-        "idempotent": false,
-        "destructive": true
+        "idempotent": true,
+        "destructive": false
       },
       "exit_codes": [
         0,
@@ -62,7 +62,7 @@
         12
       ],
       "cli": {
-        "supports_dry_run": true,
+        "supports_dry_run": false,
         "supports_stdin": false
       }
     },
@@ -97,7 +97,7 @@
     },
     {
       "operation_id": "vc.list",
-      "summary": "Enumerate Virtual Cameras in the stage",
+      "summary": "Enumerate stage cameras (live + virtual)",
       "input_schema": {
         "$ref": "#/schemas/vc.list/input"
       },

@@ -212,13 +212,36 @@ def _stage_pose_for_frame(T_ue: np.ndarray, M: np.ndarray) -> tuple[np.ndarray, 
     return C_stage, np.array([right, up, look])
 
 
-def _load_track(path: str, *, euler_order: str, blender_path: str | None = None):
-    """Load a camera track from either an intermediate file (CSV/JSON) or FBX via Blender."""
+def _load_track(path: str, *, euler_order: str, blender_path: str | None = None,
+                reader: str = "blender"):
+    """Load a camera track from an intermediate file (CSV/JSON) or FBX.
+
+    reader selects the FBX backend: 'blender' (default; headless Blender subprocess) or
+    'native' (ufbx, no Blender). Both emit the identical vcam.track/1 CameraTrack."""
     if path.lower().endswith(".fbx"):
+        if reader == "native":
+            from vcam_bridge.ingest.native_fbx import extract_fbx_native
+            return extract_fbx_native(path)
         from vcam_bridge.ingest.blender_fbx import extract_fbx
         return extract_fbx(path, blender_path=blender_path)
     from vcam_bridge.ingest.intermediate import load_intermediate
     return load_intermediate(path, euler_order=euler_order)
+
+
+def _guard_focus_native(reader: str, pivot_distance_const) -> None:
+    """--pivot-distance focus needs a focus distance the native reader can't reproduce.
+
+    The Blender reader's per-frame focus_m comes from Blender's post-import dof.focus_distance,
+    which is its own opaque value (not a derivable function of the FBX FocusDistance). The native
+    (ufbx) reader can only emit the raw FBX focus distance, so the two would silently disagree in
+    focus-pivot mode. Fail loud instead of injecting a wrong pivot."""
+    if reader == "native" and pivot_distance_const == "focus":
+        from vcam_bridge.domain.errors import ConfigError
+        raise ConfigError(
+            "--pivot-distance focus is not supported with --reader native "
+            "(ufbx can't reproduce Blender's post-import focus distance); "
+            "use --reader blender, or pass --pivot-distance const=<meters>",
+            details={"reader": reader})
 
 
 def build_keyframes(track, config: Config, *,
@@ -319,10 +342,12 @@ def convert_dry_run(fbx_or_intermediate: str, *, config: Config,
                     trim_hold_flag: bool = False,
                     start_frame: int | None = None,
                     end_frame: int | None = None,
-                    decimate_factor: int | None = None) -> tuple[str, Any]:
+                    decimate_factor: int | None = None,
+                    reader: str = "blender") -> tuple[str, Any]:
+    _guard_focus_native(reader, pivot_distance_const)
     cal = config.calibration
     track = _load_track(fbx_or_intermediate, euler_order=cal.euler_order,
-                        blender_path=getattr(config, "blender_path", None))
+                        blender_path=getattr(config, "blender_path", None), reader=reader)
     track, trim_report = _apply_trim(track, trim_hold_flag=trim_hold_flag,
                                      start_frame=start_frame, end_frame=end_frame,
                                      decimate_factor=decimate_factor)
@@ -361,7 +386,7 @@ def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid,
                  overwrite=False, verify=False, tol_pos=0.001, tol_rot=0.05, tol_zoom=0.05,
                  client=None,
                  trim_hold_flag=False, start_frame=None, end_frame=None,
-                 decimate_factor=None):
+                 decimate_factor=None, reader="blender"):
     from vcam_bridge.designer.client import DesignerClient
     from vcam_bridge.designer.inject import inject_keys
     from vcam_bridge.designer.codegen import validate_uid
@@ -371,8 +396,10 @@ def convert_live(transport, *, host, fbx, config, layer_uid, vc_uid,
             validate_uid(u)
         except ValueError as exc:
             raise ConfigError("%s must be a 0x-hex uid: %s" % (label, exc), details={"value": u}) from exc
+    _guard_focus_native(reader, pivot_distance_const)
     cal = config.calibration
-    track = _load_track(fbx, euler_order=cal.euler_order, blender_path=getattr(config, "blender_path", None))
+    track = _load_track(fbx, euler_order=cal.euler_order,
+                        blender_path=getattr(config, "blender_path", None), reader=reader)
     track, trim_report = _apply_trim(track, trim_hold_flag=trim_hold_flag,
                                      start_frame=start_frame, end_frame=end_frame,
                                      decimate_factor=decimate_factor)

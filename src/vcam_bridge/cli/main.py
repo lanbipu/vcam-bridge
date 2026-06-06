@@ -58,6 +58,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_conv.add_argument("--tol-pos", type=float, default=0.001)
     p_conv.add_argument("--tol-rot", type=float, default=0.05)
     p_conv.add_argument("--tol-zoom", type=float, default=0.05)
+    p_conv.add_argument("--reader", choices=["blender", "native"], default="blender",
+                        help="FBX 读取后端：blender（默认，需安装 Blender）| native（ufbx，纯 pip，需 pip install -e '.[native]'）")
 
     sub.add_parser("manifest", parents=[gp])
     sub.add_parser("version", parents=[gp])
@@ -191,7 +193,7 @@ def _dispatch(args: argparse.Namespace) -> tuple[str, Any]:
         if args.dry_run:
             return convert_cmd.convert_dry_run(args.fbx, config=cfg, layer_uid=layer_uid,
                                                overwrite=args.overwrite, pivot_distance_const=const,
-                                               **trim_kw)
+                                               reader=args.reader, **trim_kw)
 
         # Live injection path — camera 解析推迟到这里（dry-run 不消费 vc_uid，不该被 --camera-name 逼连 director）。
         if not args.yes:
@@ -221,6 +223,7 @@ def _dispatch(args: argparse.Namespace) -> tuple[str, Any]:
             tol_pos=args.tol_pos,
             tol_rot=args.tol_rot,
             tol_zoom=args.tol_zoom,
+            reader=args.reader,
             **trim_kw,
         )
 

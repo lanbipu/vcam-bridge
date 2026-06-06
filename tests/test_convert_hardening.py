@@ -70,3 +70,23 @@ def test_solo_verify_marks_pose_unverified(sample_track_csv):
                             chunk_size=100, verify=True)
     assert data["verify"]["pose_verified"] is False
     assert data["verify"]["level"] == "persistence-only"
+
+
+def test_focus_native_guard_rejects_combo():
+    # native reader can't reproduce Blender's opaque post-import focus distance, so
+    # --pivot-distance focus + --reader native must fail loud (not silently inject a wrong pivot).
+    import pytest
+    from vcam_bridge.cli.commands.convert import convert_dry_run, _guard_focus_native
+    from vcam_bridge.domain.errors import ConfigError
+    from vcam_bridge.domain.models import Config
+
+    with pytest.raises(ConfigError):
+        _guard_focus_native("native", "focus")
+    # guard fires before any FBX load (raises even on a nonexistent path)
+    with pytest.raises(ConfigError):
+        convert_dry_run("nope.fbx", config=Config(), layer_uid="0x1",
+                        pivot_distance_const="focus", reader="native")
+    # allowed combos must NOT raise from the guard
+    _guard_focus_native("blender", "focus")
+    _guard_focus_native("native", None)
+    _guard_focus_native("native", 5.0)

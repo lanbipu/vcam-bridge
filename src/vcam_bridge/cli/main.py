@@ -59,7 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_conv.add_argument("--tol-rot", type=float, default=0.05)
     p_conv.add_argument("--tol-zoom", type=float, default=0.05)
     p_conv.add_argument("--reader", choices=["blender", "native"], default="native",
-                        help="FBX 读取后端：native（默认，ufbx，纯 pip，需 pip install -e '.[native]'）| blender（回退，需安装 Blender）")
+                        help="FBX 读取后端：native（默认，ufbx，纯 pip 核心依赖）| blender（回退，需安装 Blender）")
 
     sub.add_parser("manifest", parents=[gp])
     sub.add_parser("version", parents=[gp])

@@ -27,13 +27,14 @@ _LOG_CAP = 64 * 1024
 
 def _ufbx_version() -> str:
     """Read ufbx's version from dist metadata WITHOUT importing the C extension (whose
-    teardown segfaults).  Doubles as the availability check for the optional [native] extra."""
+    teardown segfaults).  Doubles as an availability check (ufbx is a core dependency, so this
+    should only fire on a broken/partial install)."""
     try:
         return metadata.version("ufbx")
     except metadata.PackageNotFoundError as exc:
         raise ExternalError(
-            "native FBX reader requires ufbx; install it with: pip install -e '.[native]' "
-            "(or use --reader blender)",
+            "native FBX reader requires ufbx (a core dependency); reinstall the package: "
+            "pip install -e . (or use --reader blender)",
             details={"missing": "ufbx"}) from exc
 
 

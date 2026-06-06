@@ -14,11 +14,12 @@ dependencies = [
     "scipy>=1.10",
     "pyyaml>=6",
     "requests>=2.28",
+    "ufbx==0.0.5",   # default FBX reader (--reader native); pinned, v0.0.x WIP. Blender is the
+                     # --reader blender fallback and needs no Python dep (it shells out to Blender).
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]
-native = ["ufbx==0.0.5"]   # Blender-free FBX reader (--reader native); pinned, v0.0.x WIP
 
 [project.scripts]
 vcam = "vcam_bridge.cli.main:main"

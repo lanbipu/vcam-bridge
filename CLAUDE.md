@@ -58,9 +58,13 @@ The `integration` marker flags tests requiring Blender or a live Designer instan
 
 ```
 FBX file
-  → ingest/blender_fbx.py    (subprocess: Blender --background --python blender_extract.py)
-  → ingest/blender_extract.py (bpy: extract matrix_world, FOV, focal/sensor per frame)
-  → domain/models.CameraTrack (schema "vcam.track/1": fps, camera name, Frame[])
+  → FBX reader (subprocess; picked by --reader, default native):
+      DEFAULT  ingest/native_fbx.py   → native_extract.py  (ufbx: evaluate_scene world matrix,
+                                                             FOV, focal per frame; no Blender)
+      FALLBACK ingest/blender_fbx.py  → blender_extract.py (bpy: matrix_world, FOV, focal/sensor
+                                                             per frame; --reader blender)
+  → domain/models.CameraTrack (schema "vcam.track/1": fps, camera name, Frame[]) — both readers
+                               emit this identically (native is byte-parity-tested vs Blender)
   → cli/commands/convert.py   (build_keyframes: apply M, decompose, compute zoom)
   → designer/codegen.py       (generate Py2.7 injection script with JSON payload)
   → designer/inject.py        (chunked HTTP /execute calls with timeout-bisect retry)
@@ -74,6 +78,8 @@ The UE→Disguise mapping has three non-obvious steps:
 1. **Blender undo** — FBX import bakes a 0.01 scale into `matrix_world`; `blender_extract.py` divides it back out so downstream gets raw UE-centimeter coordinates.
 2. **`default_M()`** — A 4×4 similarity transform (cm→m + axis remap + reflection). The reflection (`det(M) < 0`) is intentional — it undoes Blender's Y-axis flip. This matrix lives in `transform/register.py`.
 3. **Pivot-orbit decompose** — `transform/decompose.py` converts a free camera position + rotation matrix into Disguise's (pivot, elevation/heading/roll, distance) representation. The Euler convention is `disguise_zxy` — a custom order where elevation=X, heading=Y, roll=Z, different from scipy's standard ZXY.
+
+Step 1 above is the **Blender** reader's quirk. The **native (ufbx)** reader produces a `Frame.T` that is byte-equivalent to Blender's via a different route: it requests `target_axes=axes_right_handed_z_up` (normalizing any source axis system, incl. Y-up FBX, to Blender's convention) and right-multiplies the camera rotation by a constant local-axis matrix `C` (FBX→Blender camera-axis remap). There is no 0.01 scale to undo. From `CameraTrack` onward (`default_M`, decompose, codegen) the two readers share the exact same path — so `default_M`'s reflection note still applies unchanged.
 
 ### Designer Communication
 
@@ -105,6 +111,6 @@ All errors extend `VcamError(code, exit_code, retryable, message, details)`. Onl
 
 - **Time-based injection, not frame-based** — keyframes are placed at `t_sec` positions converted to Designer beats via `timeToBeat()`. UE fps and Designer fps don't need to match.
 - **Chunk + bisect retry** — injection splits keyframes into chunks (default 200). On timeout, the failing chunk is halved and retried, down to `min_chunk=8`.
-- **FBX cache** — Blender extraction results are cached by SHA256(fbx + script + blender version) in `~/.cache/vcam_bridge/fbx/`. Same FBX won't re-extract.
+- **FBX cache** — extraction results are cached in `~/.cache/vcam_bridge/fbx/` by SHA256 of (fbx + extractor script + reader version + a `reader` marker), so the native and Blender readers keep distinct entries and the same FBX won't re-extract.
 - **Dual FOV injection** — both `view_angle` (vertical, for Live Cameras) and `zoom` (for Virtual Cameras) are written, so either camera type renders correct FOV.
 - **`--overwrite` semantics** — `stripToFirstKey()` runs only on the first chunk of a convert; subsequent chunks must not re-strip or they'd erase what earlier chunks wrote.

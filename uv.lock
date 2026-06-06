@@ -602,14 +602,12 @@ dependencies = [
     { name = "pyyaml" },
     { name = "requests" },
     { name = "scipy" },
+    { name = "ufbx" },
 ]
 
 [package.optional-dependencies]
 dev = [
     { name = "pytest" },
-]
-native = [
-    { name = "ufbx" },
 ]
 
 [package.metadata]
@@ -620,6 +618,6 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6" },
     { name = "requests", specifier = ">=2.28" },
     { name = "scipy", specifier = ">=1.10" },
-    { name = "ufbx", marker = "extra == 'native'", specifier = "==0.0.5" },
+    { name = "ufbx", specifier = "==0.0.5" },
 ]
-provides-extras = ["dev", "native"]
+provides-extras = ["dev"]

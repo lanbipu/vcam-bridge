@@ -17,7 +17,7 @@ import math
 import os
 import sys
 
-import ufbx   # only imported inside the worker (optional [native] dependency)
+import ufbx   # core dependency, but imported only inside the worker (its teardown segfaults)
 
 # FBX camera local axes -> Blender camera local axes.  ufbx returns the raw FBX node
 # rotation; Designer's downstream _stage_pose_for_frame assumes Blender's camera

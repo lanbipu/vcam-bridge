@@ -67,8 +67,8 @@ Complete step-by-step for injecting a UE FBX camera animation into Designer.
 ### Prerequisites
 - Disguise Designer running with a project open
 - FBX file exported from UE Sequencer (CineCameraActor)
-- FBX reader: **native (ufbx) is the default** — needs `ufbx` in the project venv
-  (`uv pip install -e '.[native]'`). Reads binary **and** ASCII FBX, no external app.
+- FBX reader: **native (ufbx) is the default** — `ufbx` is a core dependency
+  (`uv pip install -e .` installs it). Reads binary **and** ASCII FBX, no external app.
 - Blender is the **fallback** (`--reader blender`) — auto-detected at
   `/Applications/Blender.app` on macOS, or `$BLENDER`. Only needed if you opt into it
   (note: Blender cannot read ASCII FBX).

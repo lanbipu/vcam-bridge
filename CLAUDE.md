@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-vcam-bridge converts UE Sequencer FBX camera animations into Disguise Designer AnimateCameraControl (ACC) keyframes. It extracts camera transforms via a headless Blender subprocess, maps UE coordinates to Disguise stage space, decomposes free-camera poses into pivot-orbit form, and injects keyframes through Designer's Python `/execute` API.
+vcam-bridge converts UE Sequencer FBX camera animations into Disguise Designer AnimateCameraControl (ACC) keyframes. It extracts camera transforms via the `ufbx` native reader by default (`--reader native`; a headless Blender subprocess remains as the `--reader blender` fallback), maps UE coordinates to Disguise stage space, decomposes free-camera poses into pivot-orbit form, and injects keyframes through Designer's Python `/execute` API.
 
 ## Parent Project References
 

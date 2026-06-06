@@ -67,7 +67,11 @@ Complete step-by-step for injecting a UE FBX camera animation into Designer.
 ### Prerequisites
 - Disguise Designer running with a project open
 - FBX file exported from UE Sequencer (CineCameraActor)
-- Blender installed locally (auto-detected at `/Applications/Blender.app` on macOS, or `$BLENDER`)
+- FBX reader: **native (ufbx) is the default** — needs `ufbx` in the project venv
+  (`uv pip install -e '.[native]'`). Reads binary **and** ASCII FBX, no external app.
+- Blender is the **fallback** (`--reader blender`) — auto-detected at
+  `/Applications/Blender.app` on macOS, or `$BLENDER`. Only needed if you opt into it
+  (note: Blender cannot read ASCII FBX).
 
 ### Step 0 — Resolve Director address
 
@@ -235,9 +239,10 @@ Pivot/rotation/distance mapping is identical for both. What differs:
 | `--chunk-size N` | Reduce from default 200 if Designer times out on long animations |
 | `--pivot-distance focus` | Use FBX focus distance as orbit pivot distance |
 | `--pivot-distance const=M` | Fixed pivot distance in meters |
+| `--reader blender` | Fall back to the Blender extractor (default is `native`/ufbx). Use if ufbx misreads a file; needs Blender installed. `--reader native` is the default and rarely needs to be passed. (`--pivot-distance focus` requires `--reader blender`.) |
 
 ### Error recovery
 - **Exit 7 (TIMEOUT)**: retry with `--chunk-size` halved (e.g. 200 -> 100 -> 50)
 - **Exit 8 (EXTERNAL)**: check Designer connectivity (`curl http://HOST:PORT/api/session/status/health`)
 - **Exit 9 (PARTIAL)**: some chunks written; re-run same command (idempotent)
-- **Exit 13 (INVALID_FBX)**: FBX has no camera or Blender extraction failed; check `error.details.stderr`
+- **Exit 13 (INVALID_FBX)**: FBX has no camera, or the reader failed to extract (native/ufbx by default, or Blender via `--reader blender`); check `error.details.stderr`

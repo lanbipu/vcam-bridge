@@ -81,12 +81,27 @@ def test_focus_native_guard_rejects_combo():
     from vcam_bridge.domain.models import Config
 
     with pytest.raises(ConfigError):
-        _guard_focus_native("native", "focus")
+        _guard_focus_native("take.fbx", "native", "focus")
     # guard fires before any FBX load (raises even on a nonexistent path)
     with pytest.raises(ConfigError):
         convert_dry_run("nope.fbx", config=Config(), layer_uid="0x1",
                         pivot_distance_const="focus", reader="native")
     # allowed combos must NOT raise from the guard
-    _guard_focus_native("blender", "focus")
-    _guard_focus_native("native", None)
-    _guard_focus_native("native", 5.0)
+    _guard_focus_native("take.fbx", "blender", "focus")     # blender reproduces focus
+    _guard_focus_native("take.fbx", "native", None)         # not focus mode
+    _guard_focus_native("take.fbx", "native", 5.0)          # const distance
+    _guard_focus_native("track.json", "native", "focus")    # intermediate file: reader irrelevant
+    _guard_focus_native("track.csv", "native", "focus")
+
+
+def test_default_reader_is_native():
+    # 灰度阶段②：默认 reader 切到 native(ufbx);Blender 降级为 --reader blender 回退。
+    # 锁死默认值,防止意外回退。
+    import inspect
+    from vcam_bridge.cli.main import build_parser
+    from vcam_bridge.cli.commands.convert import _load_track, convert_dry_run, convert_live
+
+    args = build_parser().parse_args(["convert", "--fbx", "x.fbx", "--target-uid", "0x1"])
+    assert args.reader == "native"
+    for fn in (_load_track, convert_dry_run, convert_live):
+        assert inspect.signature(fn).parameters["reader"].default == "native"
